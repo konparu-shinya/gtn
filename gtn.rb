@@ -25,7 +25,13 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj11", "#{BasePrm}/prj12", "#{BasePrm}/prj13", "#{BasePrm}/prj14", "#{BasePrm}/prj15",
         "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
 
-TimeOut = 30
+ACK = 0x06
+NAK = 0x15
+STX = 0x02
+ETX = 0x03
+ENQ = 0x05
+EOT = 0x04
+TimeOut = 3000
 
 CommentTitle = 'コメント(先頭に#を付けると実行しません)'
 IFCmt = 'if (RegA & Mask) == Value then goto'
@@ -104,7 +110,7 @@ class MySocket
   attr_reader :open_err
 
   def initialize
-    @open_err = 0
+    @open_err = nil
     @port = TCPSocket.open("localhost",9001)
   end
 
@@ -120,7 +126,9 @@ class MySocket
   # NT1200(アーキテクト)フォーマットでデータ送信しACK/NACKを待つ
   def nt_send(sbuf, packstr)
     sbuf[-2] = calc_crc(sbuf)
-    send( sbuf.pack(packstr) )
+#p [__LINE__, sbuf.pack(packstr), sbuf.pack(packstr).size ]
+    @port.write( sbuf.pack(packstr) )
+    @port.flush
 
     ret = nt_recv_ack_nack()
     @open_err = 1 if ret.size < 1
@@ -158,14 +166,11 @@ class MySocket
   def nt_recv
     rbuf = []
 
-    c = get_chr(TimeOut)      # STX
+    c = get_chr(TimeOut)        # STX
     rbuf.push c if c != nil
 
     if c == STX
-      len = get_chr(TimeOut)
-
-      len = get_chr(TimeOut) if len == STX  # 小室さん側のバグ対処
-
+      len = get_chr(TimeOut)    # length
       rbuf.push len if len != nil
 
       if len > ETX
@@ -175,6 +180,14 @@ class MySocket
       end
     end
     return rbuf
+  end
+
+  def get_chr(tm)
+    (1..tm).each do |i|
+      rs = select [@port], nil, nil, 0.001
+      return rs[0][0].read(1).unpack('C')[0] if rs
+    end
+    return nil
   end
 end
 
@@ -364,12 +377,12 @@ class SelProject
 
       # 画面更新
       $main_form.show
-#kon
+
       # Tnet I/O設定
 #     set_tnet
       # モータレジスタの初期化
-#     motor_reg_init
-#     dcmotor_reg_init
+      motor_reg_init
+      dcmotor_reg_init
     end
     @dialog.destroy
   end
@@ -824,9 +837,9 @@ class DcmConf
         f << "\n"
       end
     end
-#kon
+
     # モータレジスタの初期化
-#   dcmotor_reg_init
+    dcmotor_reg_init
   end
 end
 
@@ -1087,9 +1100,9 @@ class Moter
         f << "\n"
       end
     end
-#kon
+
     # モータレジスタの初期化
-#   motor_reg_init
+    motor_reg_init
   end
 end
 
