@@ -1319,7 +1319,7 @@ class Input
     @treeview.append_column(column)
 
     style = dialog.style
-    style.font_desc = Pango::FontDescription.new("MS Gothic 12")
+    style.font_desc = Pango::FontDescription.new("Monospace 12")
 #   @treeview.style = style
     dialog.style = style
 
@@ -1881,7 +1881,12 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
 
   # 削除
   def delete_clicked
-    @treeview.model.remove( @treeview.selection.selected ) if @treeview.selection.selected
+    cur_ary = []
+    @treeview.selection.selected_each { |model, path, iter| cur_ary.push iter }
+    cur_ary.each do |iter|
+      @treeview.model.remove( iter )
+    end
+
     # ステータスクリア
     clear_status
 
@@ -2138,7 +2143,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @lblStatus[0].set_text( "実行範囲が選ばれていません" )
       # 赤文字
       style = Gtk::Style.new
-      style.font_desc = Pango::FontDescription.new("Monospace 12")
+      style.font_desc = Pango::FontDescription.new("Monospace 14")
       style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
       @lblStatus[0].style = style
     end
@@ -2177,7 +2182,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @lblStatus[0].set_text( "実行行が選ばれていません" )
       # 赤文字
       style = Gtk::Style.new
-      style.font_desc = Pango::FontDescription.new("MS Gothic 12")
+      style.font_desc = Pango::FontDescription.new("Monospace 14")
       style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
       @lblStatus[0].style = style
     end
@@ -2217,7 +2222,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @lblStatus[0].set_text( "#{$act_hash_ppm[0x15]} が選ばれていません" )
       # 赤文字
       style = Gtk::Style.new
-      style.font_desc = Pango::FontDescription.new("MS Gothic 12")
+      style.font_desc = Pango::FontDescription.new("Monospace 14")
       style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
       @lblStatus[0].style = style
     else
@@ -2285,6 +2290,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       $ad_log = open( "#{ENV['HOME']}/public/" + Time.now.strftime( "A%y%m%d-%H%M%S.csv" ), 'w' )
     end
 
+=begin
     # 60行以上は動作できません
     line_count = 0
     fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
@@ -2305,6 +2311,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @lblStatus[0].set_text '60行以上の動作は実行できません!!'
       return
     end
+=end
 
     if $sock_port.open_err == nil
       # ActionプロセスへREADY要求
@@ -2332,7 +2339,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @lblStatus[0].set_text( "COMポート OPENエラー!!" )
       # 赤文字
       style = Gtk::Style.new
-      style.font_desc = Pango::FontDescription.new("MS Gothic 12")
+      style.font_desc = Pango::FontDescription.new("Monospace 14")
       style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
       @lblStatus[0].style = style
     end
