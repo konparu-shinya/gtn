@@ -110,6 +110,7 @@ class MySocket
   attr_reader :open_err
 
   def initialize
+    @rcv_msg  = []
     @open_err = nil
     @port = TCPSocket.open("localhost",9001)
   end
@@ -150,7 +151,7 @@ class MySocket
 
   # メッセージ受信
   def nt_recv_each
-    while kbhit() > 0
+    while select [@port], nil, nil, 0.001
       ret = nt_recv()
       break if ret.size == 0
       @rcv_msg.push ret if ret[2] != 1 && ret[2] != 2 # ACK/NACK以外を受信
@@ -2774,56 +2775,54 @@ else
   MkProject.new
 end
 
-=begin
 # RTタスクからの受信処理
 Gtk.timeout_add( 200 ) do
   $sock_port.nt_recv_each do |rcv_msg|
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
 
+    # ベース画面の各状態をstopに
+    $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0 && line == 1 && ( msg == 'Action success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+
     # Action画面のステータス
-    if my_no && dsp && line && my_no > 0 && dsp == 1 && $main_form.console_opened[ my_no ]
-      begin
-        # ステータス欄に表示する
-        $main_form.console_opened[ my_no ].lblStatus[ line-1 ].set_text( msg )
+    if my_no > 0 && dsp == 1 && msg && $main_form.console_opened[ my_no ]
+      # メッセージ表示
+      $main_form.console_opened[ my_no ].lblStatus[ line-1 ].set_text( msg )
+      # エラーは赤文字
+      if line == 1 && msg =~ /ERR (.*) = (\d+)/
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+        $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
 
-        # エラーは赤文字
-        if line == 1 && msg =‾ /ERR Line = <¥s(¥d+)¥s>/
-          style = Gtk::Style.new
-          style.font_desc = Pango::FontDescription.new("MS Gothic 12")
-          style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
-          $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
-          # 行番号を取り出す
-          eline = $1
-          # Actionファイルを読み込んでコメントを取り出しステータス欄に表示する
-          fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
-          if File.exist?( fname )
-            open( fname, "r" ) do |f|
-              while rline = f.gets
-                ary = (rline.chop).split( /,/ )
+        # 行番号を取り出す
+        eline = $2
+        # Actionファイルを読み込んでコメントを取り出しステータス欄に表示する
+        fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
+        if File.exist?( fname )
+          open( fname, "r" ) do |f|
+            while rline = f.gets
+              ary = (rline.chop).split( /,/ )
 
-                if ary[0].to_i == eline.to_i
-                  $main_form.console_opened[ my_no ].lblStatus[ line ].set_text( ary[1] )
-                  break
-                end
+              if ary[0].to_i == eline.to_i
+                $main_form.console_opened[ my_no ].lblStatus[ line ].set_text( ary[1] )
+                break
               end
             end
           end
-        # 黒文字で表示
-        else
-          style = Gtk::Style.new
-          style.font_desc = Pango::FontDescription.new("MS Gothic 12")
-          style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
-          $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
         end
-      rescue
+      # その他は黒文字
+      else
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+        $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
       end
-      $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0 && line == 1 && ( msg == 'success' || msg[0,3] == 'ERR' || msg[0,3] == 'EMG' )
-
     end
   end
   true
 end
 
+=begin
 Gtk.timeout_add( 500 ) do
   # SIO受信
   if $sio_form
