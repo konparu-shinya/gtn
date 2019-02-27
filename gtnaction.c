@@ -10,6 +10,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <net/if.h>
+#include <linux/can.h>
+#include <linux/can/raw.h>
 
 #define QUEUELIMIT 5
 
@@ -133,15 +136,16 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 }
 
 // コマンド受信処理
-static int dispatch(int sock, char *buf)
+static int dispatch(int sock, char *buf, int can)
 {
 	char str[32];
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
+
 	// パルスモーター設定
-	if (id==0xC101) {
+	if (id==0xC101 && can>=0) {
 	}
 	// DCモーター設定
-	else if (id==0xC103) {
+	else if (id==0xC103 && can>=0) {
 	}
 	// 動作シーケンス
 	else if (id==0xC102) {
@@ -167,11 +171,17 @@ static int dispatch(int sock, char *buf)
 	}
 	// 動作開始
 	else if (id==0xC015) {
-		seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
-		seq_tbl.run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
-		seq_tbl.run          = 1;
-		message(sock, seq_tbl.my_thread_no, 1, 1, "RUN");
-		clock_gettime(CLOCK_MONOTONIC, &tim_start);
+		if (can>=0) {
+			seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
+			seq_tbl.run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
+			seq_tbl.run          = 1;
+			message(sock, seq_tbl.my_thread_no, 1, 1, "RUN");
+			clock_gettime(CLOCK_MONOTONIC, &tim_start);
+		}
+		else{
+			message(sock, seq_tbl.my_thread_no, 1, 1, "CAN Socket Error");
+		}
+
 	}
 	// 動作停止
 	else if (id==0xC016) {
@@ -189,10 +199,11 @@ static int dispatch(int sock, char *buf)
 }
 
 // シーケンス
-static int sequence(int sock)
+static int sequence(int sock, int can)
 {
     int i;
 	char str[32];
+
 	switch (action[seq_tbl.current].act) {
 	case 0x01:		// DCモーター初期化
 		break;
@@ -319,9 +330,10 @@ static int sequence(int sock)
 }
 
 // 全体の実行処理
-static int execute(int sock)
+static int execute(int sock, int can)
 {
 	char buf[512];
+
 	while (1) {
 		char c;
 		// STX受信 0:Close -1:nothing
@@ -340,18 +352,62 @@ static int execute(int sock)
 
 		// コマンド割り振り
 		if (len>0) {
-			dispatch(sock, buf);
+			dispatch(sock, buf, can);
 		}
 
 		// シーケンス
 		if (seq_tbl.run) {
-			sequence(sock);
+			sequence(sock, can);
 		}
 
 		// Close
 		if (len==0) break;
 	}
 	return 0;
+}
+
+// CAN初期化
+static int can_init(void)
+{
+#define CAN_NAME "can0"
+#define	ID	0x13
+#define	DLC	8
+
+	struct can_frame frame;
+	struct ifreq ifr;
+	struct sockaddr_can addr;
+	int s;
+
+	system("/bin/ip link set can0 type can bitrate 500000 loopback on");
+	system("/bin/ip link set can0 up");
+
+	memset(&frame, 0, sizeof(frame));
+	frame.can_id  = ID;
+	frame.can_dlc = DLC;
+//	memcpy(&(frame.data[0]), &(data[0]), dlc); 
+
+	if ((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
+		return -2;
+	}
+
+	memset(&ifr.ifr_name, 0, sizeof(ifr.ifr_name));
+	strncpy(ifr.ifr_name, CAN_NAME, sizeof(ifr.ifr_name));
+
+	ifr.ifr_ifindex = if_nametoindex(ifr.ifr_name);
+	if (!ifr.ifr_ifindex) {
+		return -3;
+	}
+
+	addr.can_family  = AF_CAN;
+	addr.can_ifindex = ifr.ifr_ifindex;
+
+	setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, NULL, 0);
+
+	if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		return -4;
+	}
+
+	return s;
 }
 
 int main(void)
@@ -363,6 +419,8 @@ int main(void)
 	struct sockaddr_in clitSockAddr;	//client internet socket address
 	unsigned short servPort = 9001;		//server port number
 	unsigned int clitLen;			// client internet socket address length
+	int canSock = can_init();
+printf("%s %d %d\n", __FILE__, __LINE__, canSock);
 
 	if ((servSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 ){
 		perror("socket() failed.");
@@ -405,13 +463,17 @@ int main(void)
 		ret = 0;
 #endif
 		if (ret != -1) {
-			execute(clitSock);
+			execute(clitSock, canSock);
 		}
 
 		close(clitSock);
 		printf("close\n");
 	}
 	close(servSock);
+
+	if (canSock>=0) {
+		close(canSock);
+	}
 
 	return 0;
 }
