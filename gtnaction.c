@@ -59,6 +59,22 @@ struct _action_tbl {
 
 static struct timespec tim_start;
 
+#define CAN_NAME "can0"
+#define	ID	0x13
+#define	DLC	8
+
+// CAN送信
+static int can_send(int can, unsigned char data[])
+{
+	struct can_frame frame;
+	memset(&frame, 0, sizeof(frame));
+	frame.can_id  = ID;
+	frame.can_dlc = DLC;
+	memcpy(&(frame.data[0]), &(data[0]), DLC); 
+
+   	write (can, &frame, CAN_MTU);
+}
+
 // CRC計算
 static unsigned char calc_crc(char *sbuf, int size)
 {
@@ -143,6 +159,8 @@ static int dispatch(int sock, char *buf, int can)
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0) {
+ unsigned char data[] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
+		can_send(can, data);
 	}
 	// DCモーター設定
 	else if (id==0xC103 && can>=0) {
@@ -335,33 +353,48 @@ static int execute(int sock, int can)
 	char buf[512];
 
 	while (1) {
-		char c;
-		// STX受信 0:Close -1:nothing
-		int len = recv(sock, &c, 1, 0);
+		// CAN Sokcet
+		if (can>=0) {
+			struct can_frame frame;
+			int len = read(can, &frame, sizeof(frame));
+			if (len==sizeof(frame)) {
+//  *p_id = frame.can_id;
+//  *p_dlc = frame.can_dlc;
+//  memcpy(data, frame.data, CAN_MAX_DLEN);
+		printf("%s %d %d\n", __FILE__,__LINE__,len);
+			}
+		}
 
-		// Recv
-		if (len>0) {
-			len = nt_recv(sock, c, buf);
+		// Local Sokcet
+		{
+			// STX受信 0:Close -1:nothing
+			char c;
+			int len = recv(sock, &c, 1, 0);
+
+			// Recv
+			if (len>0) {
+				len = nt_recv(sock, c, buf);
 		printf("%s %d %d %02X %02X\n", __FILE__,__LINE__,len,(unsigned char)buf[4],(unsigned char)buf[5]);
-		}
+			}
 
-		// ACK返信
-		if (len>0) {
-			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
-		}
+			// ACK返信
+			if (len>0) {
+				nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
+			}
 
-		// コマンド割り振り
-		if (len>0) {
-			dispatch(sock, buf, can);
+			// コマンド割り振り
+			if (len>0) {
+				dispatch(sock, buf, can);
+			}
+
+			// Close
+			if (len==0) break;
 		}
 
 		// シーケンス
 		if (seq_tbl.run) {
 			sequence(sock, can);
 		}
-
-		// Close
-		if (len==0) break;
 	}
 	return 0;
 }
@@ -369,22 +402,12 @@ static int execute(int sock, int can)
 // CAN初期化
 static int can_init(void)
 {
-#define CAN_NAME "can0"
-#define	ID	0x13
-#define	DLC	8
-
-	struct can_frame frame;
 	struct ifreq ifr;
 	struct sockaddr_can addr;
 	int s;
 
-	system("/bin/ip link set can0 type can bitrate 500000 loopback on");
+	system("/bin/ip link set can0 type can bitrate 500000");
 	system("/bin/ip link set can0 up");
-
-	memset(&frame, 0, sizeof(frame));
-	frame.can_id  = ID;
-	frame.can_dlc = DLC;
-//	memcpy(&(frame.data[0]), &(data[0]), dlc); 
 
 	if ((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
 		return -2;
@@ -401,7 +424,7 @@ static int can_init(void)
 	addr.can_family  = AF_CAN;
 	addr.can_ifindex = ifr.ifr_ifindex;
 
-	setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, NULL, 0);
+//	setsockopt(s, SOL_CAN_RAW, CAN_RAW_FILTER, NULL, 0);
 
 	if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		return -4;
@@ -420,7 +443,6 @@ int main(void)
 	unsigned short servPort = 9001;		//server port number
 	unsigned int clitLen;			// client internet socket address length
 	int canSock = can_init();
-printf("%s %d %d\n", __FILE__, __LINE__, canSock);
 
 	if ((servSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 ){
 		perror("socket() failed.");
@@ -458,6 +480,11 @@ printf("%s %d %d\n", __FILE__, __LINE__, canSock);
 	printf("%s %d %d %x\n", __FILE__, __LINE__, ret, O_NONBLOCK);
 		if (ret != -1) {
 			ret = fcntl(clitSock, F_SETFL, ret | O_NONBLOCK);
+		}
+		ret = fcntl(canSock, F_GETFL, 0);
+	printf("%s %d %d %x\n", __FILE__, __LINE__, ret, O_NONBLOCK);
+		if (ret != -1) {
+			ret = fcntl(canSock, F_SETFL, ret | O_NONBLOCK);
 		}
 #else
 		ret = 0;
