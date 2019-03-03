@@ -2791,13 +2791,14 @@ Gtk.timeout_add( 200 ) do
       # メッセージ表示
       $main_form.console_opened[ my_no ].lblStatus[ line-1 ].set_text( msg )
       # エラーは赤文字
-      if line == 1 && msg =~ /ERR (.*) = (\d+)/
+      if line == 1 && msg =~ /ERR/
         style = Gtk::Style.new
         style.font_desc = Pango::FontDescription.new("Monospace 14")
         style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
         $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
 
         # 行番号を取り出す
+        msg =~ /ERR (.*) = (\d+)/
         eline = $2
         # Actionファイルを読み込んでコメントを取り出しステータス欄に表示する
         fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
