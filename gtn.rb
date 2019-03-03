@@ -188,7 +188,8 @@ class MySocket
   def get_chr(tm)
     (1..tm).each do |i|
       rs = select [@port], nil, nil, 0.001
-      return rs[0][0].read(1).unpack('C')[0] if rs
+      c = rs[0][0].read(1) if rs
+      return c.unpack('C')[0] if c
     end
     return nil
   end
