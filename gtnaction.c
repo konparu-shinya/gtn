@@ -60,8 +60,34 @@ struct _action_tbl {
 static struct timespec tim_start;
 
 #define CAN_NAME "can0"
-#define	ID	0x13
+#define	ID	0x10
 #define	DLC	8
+
+// データ識別
+#define	CAN_SPLIT_INFO		0x2A		// 分割ﾃﾞｰﾀ 識別情報
+#define	CAN_SPLIT_START		0x2B		// 分割ﾃﾞｰﾀ 先頭ﾌﾚｰﾑ
+#define	CAN_SPLIT_PROC		0x2C		// 分割ﾃﾞｰﾀ 転送中
+#define CAN_SPLIT_END		0x2D		// 分割ﾃﾞｰﾀ 最終ﾌﾚｰﾑ
+
+// データの種類
+#define	INFO_C101_MSG	0x12	// 設定ﾃﾞｰﾀ
+#define	INFO_C102_MSG	0x11	// ｼｰｹﾝｽ動作ﾒｯｾｰｼﾞ
+#define	INFO_C103_MSG	0x12	// 設定ﾃﾞｰﾀ
+
+// レコード番号
+#define	SEQ_CTL_REC_DCM_1		 0		// DC ﾓｰﾀ #1
+#define	SEQ_CTL_REC_DCM_2		 1		// DC ﾓｰﾀ #2
+#define	SEQ_CTL_REC_DCM_3		 2		// DC ﾓｰﾀ #3
+#define	SEQ_CTL_REC_PSM_1		 3		// ﾊﾟﾙｽﾓｰﾀ #1
+#define	SEQ_CTL_REC_PSM_2		 4		// ﾊﾟﾙｽﾓｰﾀ #2
+#define	SEQ_CTL_REC_PSM_3		 5		// ﾊﾟﾙｽﾓｰﾀ #3
+#define	SEQ_CTL_REC_DI_1		 6		// DIO In #1
+#define	SEQ_CTL_REC_DO_1		 7		// DIO Out #1
+#define	SEQ_CTL_REC_DI_32		 8		// DIO 4ﾊﾞｲﾄ入力
+#define	SEQ_CTL_REC_DO_32		 9		// DIO 4ﾊﾞｲﾄ出力
+#define	SEQ_CTL_REC_TM_WAIT		10		// 指定時間待ち
+#define	SEQ_CTL_REC_GOTO_ROW	11		// 行の移動
+#define	SEQ_CTL_REC_BC_READ		12		// ﾊﾞｰｺｰﾄﾞ･ﾘｰﾀﾞｰ
 
 // CAN送信
 static int can_send(int can, unsigned char data[])
@@ -73,6 +99,30 @@ static int can_send(int can, unsigned char data[])
 	memcpy(&(frame.data[0]), &(data[0]), DLC); 
 
    	write (can, &frame, CAN_MTU);
+	return 0;
+}
+
+// CANジグフォーマットでの送信(送信後は返信を待つ)
+static int can_jigfmt_send(int can, unsigned char sid, unsigned char repnum, unsigned char datident, unsigned char d1, unsigned char d2, unsigned char d3, unsigned char d4)
+{
+	struct can_frame frame;
+	int tm, len;
+#define MAX_SEQNUM 0x10
+static unsigned char seqnum = 0;
+	unsigned char data[DLC]={sid, repnum, datident, seqnum, d1, d2, d3, d4};
+	seqnum = (seqnum+1)%MAX_SEQNUM;		// 次回のシーケンス番号のインクリメント
+	can_send(can, data);
+
+	/* 返信をまつ */
+	for (tm=0; tm<TIMEOUT; tm++) {
+		len = read(can, &frame, sizeof(frame));
+		if (len==sizeof(frame)) {
+			break;
+		}
+		usleep(1000);
+	}
+printf("%s %d %d\n", __FILE__,__LINE__,len);
+	return (tm<TIMEOUT) ? 0:-1;
 }
 
 // CRC計算
@@ -154,16 +204,58 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 // コマンド受信処理
 static int dispatch(int sock, char *buf, int can)
 {
+	int i;
 	char str[32];
+	unsigned char datident;
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0) {
- unsigned char data[] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
-		can_send(can, data);
+		unsigned char sid    = (unsigned char)buf[6]+0x10;
+		unsigned char repnum = (unsigned char)buf[6];
+		unsigned char mno;
+		switch (buf[7]) {
+		case 1: mno = SEQ_CTL_REC_PSM_1; break;
+		case 2: mno = SEQ_CTL_REC_PSM_2; break;
+		default: mno = SEQ_CTL_REC_PSM_3; break;
+		}
+		can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C101_MSG, mno);
+		for (i=0; i<9; i++) {
+			if (i==0) {
+				datident = CAN_SPLIT_START;
+			}
+			else if (i==8) {
+				datident = CAN_SPLIT_END;
+			}
+			else{
+				datident = CAN_SPLIT_PROC;
+			}
+			can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
+		}
 	}
 	// DCモーター設定
 	else if (id==0xC103 && can>=0) {
+		unsigned char sid    = (unsigned char)buf[6]+0x10;
+		unsigned char repnum = (unsigned char)buf[6];
+		unsigned char mno;
+		switch (buf[7]) {
+		case 1: mno = SEQ_CTL_REC_DCM_1; break;
+		case 2: mno = SEQ_CTL_REC_DCM_2; break;
+		default: mno = SEQ_CTL_REC_DCM_3; break;
+		}
+		can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C103_MSG, mno);
+		for (i=0; i<4; i++) {
+			if (i==0) {
+				datident = CAN_SPLIT_START;
+			}
+			else if (i==3) {
+				datident = CAN_SPLIT_END;
+			}
+			else{
+				datident = CAN_SPLIT_PROC;
+			}
+			can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
+		}
 	}
 	// 動作シーケンス
 	else if (id==0xC102) {
@@ -197,7 +289,7 @@ static int dispatch(int sock, char *buf, int can)
 			clock_gettime(CLOCK_MONOTONIC, &tim_start);
 		}
 		else{
-			message(sock, seq_tbl.my_thread_no, 1, 1, "CAN Socket Error");
+			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
 		}
 
 	}
@@ -373,6 +465,7 @@ static int execute(int sock, int can)
 
 			// Recv
 			if (len>0) {
+				memset(buf, 0, sizeof(buf));
 				len = nt_recv(sock, c, buf);
 		printf("%s %d %d %02X %02X\n", __FILE__,__LINE__,len,(unsigned char)buf[4],(unsigned char)buf[5]);
 			}
@@ -489,9 +582,7 @@ int main(void)
 #else
 		ret = 0;
 #endif
-		if (ret != -1) {
-			execute(clitSock, canSock);
-		}
+		execute(clitSock, canSock);
 
 		close(clitSock);
 		printf("close\n");
