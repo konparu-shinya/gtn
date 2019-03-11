@@ -22,7 +22,7 @@
 #define ETX		0x03
 #define ENQ		0x05
 #define EOT		0x04
-#define TIMEOUT	3000
+#define TIMEOUT	30000
 
 static char ack_msg_data[] = {STX, 0x04,0x01,0x00,0x11, ETX};
                                                                 //1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
@@ -116,13 +116,77 @@ static unsigned char seqnum = 0;
 	/* 返信をまつ */
 	for (tm=0; tm<TIMEOUT; tm++) {
 		len = read(can, &frame, sizeof(frame));
-		if (len==sizeof(frame)) {
+		/* IDが照合できればOK */
+		if (len==sizeof(frame) && frame.can_id==sid) {
 			break;
 		}
-		usleep(1000);
+		usleep(100);
 	}
-printf("%s %d %d\n", __FILE__,__LINE__,len);
 	return (tm<TIMEOUT) ? 0:-1;
+}
+
+// スレーブへパルスモーター設定を送信する
+static int can_ppm_conf_send(int can, char *buf)
+{
+	unsigned char sid    = (unsigned char)buf[6]+0x10;
+	unsigned char repnum = (unsigned char)buf[6];
+	unsigned char datident, mno;
+	int i, ret;
+
+	switch (buf[7]) {
+	case 1: mno = SEQ_CTL_REC_PSM_1; break;
+	case 2: mno = SEQ_CTL_REC_PSM_2; break;
+	default: mno = SEQ_CTL_REC_PSM_3; break;
+	}
+	ret = can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C101_MSG, mno);
+	if (ret) return -1;
+
+	for (i=0; i<9; i++) {
+		if (i==0) {
+			datident = CAN_SPLIT_START;
+		}
+		else if (i==8) {
+			datident = CAN_SPLIT_END;
+		}
+		else{
+			datident = CAN_SPLIT_PROC;
+		}
+		ret = can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
+		if (ret) return -1;
+	}
+	return 0;
+}
+
+// スレーブへDCモーター設定を送信する
+static int can_dc_conf_send(int can, char *buf)
+{
+	unsigned char sid    = (unsigned char)buf[6]+0x10;
+	unsigned char repnum = (unsigned char)buf[6];
+	unsigned char datident, mno;
+	int i, ret;
+
+	switch (buf[7]) {
+	case 1: mno = SEQ_CTL_REC_DCM_1; break;
+	case 2: mno = SEQ_CTL_REC_DCM_2; break;
+	default: mno = SEQ_CTL_REC_DCM_3; break;
+	}
+	ret = can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C103_MSG, mno);
+	if (ret) return -1;
+
+	for (i=0; i<4; i++) {
+		if (i==0) {
+			datident = CAN_SPLIT_START;
+		}
+		else if (i==3) {
+			datident = CAN_SPLIT_END;
+		}
+		else{
+			datident = CAN_SPLIT_PROC;
+		}
+		ret = can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
+		if (ret) return -1;
+	}
+	return 0;
 }
 
 // CRC計算
@@ -158,7 +222,7 @@ static int nt_recv(int sock, char c, char *p)
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(1000);
+		usleep(100);
 	}
 	if (tm>=TIMEOUT) return -1;
 	length = (int)c;
@@ -169,7 +233,7 @@ static int nt_recv(int sock, char c, char *p)
 			len = recv(sock, &c, 1, 0);
 			if (len==0) return 0;
 			if (len>0) break;
-			usleep(1000);
+			usleep(100);
 		}
 		if (tm>=TIMEOUT) return -1;
 		p[count++] = c;
@@ -180,7 +244,7 @@ static int nt_recv(int sock, char c, char *p)
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(1000);
+		usleep(100);
 	}
 	if (tm>=TIMEOUT) return -1;
 	if (c!=ETX) return -1;
@@ -204,58 +268,16 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 // コマンド受信処理
 static int dispatch(int sock, char *buf, int can)
 {
-	int i;
 	char str[32];
-	unsigned char datident;
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0) {
-		unsigned char sid    = (unsigned char)buf[6]+0x10;
-		unsigned char repnum = (unsigned char)buf[6];
-		unsigned char mno;
-		switch (buf[7]) {
-		case 1: mno = SEQ_CTL_REC_PSM_1; break;
-		case 2: mno = SEQ_CTL_REC_PSM_2; break;
-		default: mno = SEQ_CTL_REC_PSM_3; break;
-		}
-		can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C101_MSG, mno);
-		for (i=0; i<9; i++) {
-			if (i==0) {
-				datident = CAN_SPLIT_START;
-			}
-			else if (i==8) {
-				datident = CAN_SPLIT_END;
-			}
-			else{
-				datident = CAN_SPLIT_PROC;
-			}
-			can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
-		}
+		can_ppm_conf_send(can, buf);
 	}
 	// DCモーター設定
 	else if (id==0xC103 && can>=0) {
-		unsigned char sid    = (unsigned char)buf[6]+0x10;
-		unsigned char repnum = (unsigned char)buf[6];
-		unsigned char mno;
-		switch (buf[7]) {
-		case 1: mno = SEQ_CTL_REC_DCM_1; break;
-		case 2: mno = SEQ_CTL_REC_DCM_2; break;
-		default: mno = SEQ_CTL_REC_DCM_3; break;
-		}
-		can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C103_MSG, mno);
-		for (i=0; i<4; i++) {
-			if (i==0) {
-				datident = CAN_SPLIT_START;
-			}
-			else if (i==3) {
-				datident = CAN_SPLIT_END;
-			}
-			else{
-				datident = CAN_SPLIT_PROC;
-			}
-			can_jigfmt_send(can, sid, repnum, datident, buf[(i*4)+0], buf[(i*4)+1], buf[(i*4)+2], buf[(i*4)+3]);
-		}
+		can_dc_conf_send(can, buf);
 	}
 	// 動作シーケンス
 	else if (id==0xC102) {
