@@ -2340,7 +2340,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       $main_form.status[ @my_console_no-1 ].set_text "run"
       $sock_port.nt_send( [STX, 0x11, 0x00, 0x00, 0xC015, @my_console_no, @spnBtnTimes.value_as_int, 0, 0, 0, 0, ETX], 'C4nCNn3C2' )
     else
-      @lblStatus[0].set_text( "COMポート OPENエラー!!" )
+      @lblStatus[0].set_text( "Socket送受信エラー!!" )
       # 赤文字
       style = Gtk::Style.new
       style.font_desc = Pango::FontDescription.new("Monospace 14")
@@ -2675,7 +2675,7 @@ class Gtn
                                                               @delay_sec[ i-1 ].value_as_int, 0, ETX], 'C4nCNn3C2' )
         $main_form.main_sts.set_text( "" )
       else
-        $main_form.main_sts.set_text( "COMポート OPENエラー!!" )
+        $main_form.main_sts.set_text( "Socket送受信エラー!!" )
       end
 =end
     end
