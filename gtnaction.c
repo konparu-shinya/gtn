@@ -268,16 +268,27 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 // コマンド受信処理
 static int dispatch(int sock, char *buf, int can)
 {
+static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	char str[32];
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0) {
-		can_ppm_conf_send(can, buf);
+		if (can_ppm_conf_send(can, buf)) {
+			param_err = -1;
+		}
+		else{
+			param_err = 0;
+		}
 	}
 	// DCモーター設定
 	else if (id==0xC103 && can>=0) {
-		can_dc_conf_send(can, buf);
+		if (can_dc_conf_send(can, buf)) {
+			param_err = -1;
+		}
+		else{
+			param_err = 0;
+		}
 	}
 	// 動作シーケンス
 	else if (id==0xC102) {
@@ -303,17 +314,19 @@ static int dispatch(int sock, char *buf, int can)
 	}
 	// 動作開始
 	else if (id==0xC015) {
-		if (can>=0) {
+		if (can<0) {
+			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
+		}
+		else if (param_err) {
+			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR DC/PPM Param Send Error");
+		}
+		else{
 			seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
 			seq_tbl.run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
 			seq_tbl.run          = 1;
 			message(sock, seq_tbl.my_thread_no, 1, 1, "RUN");
 			clock_gettime(CLOCK_MONOTONIC, &tim_start);
 		}
-		else{
-			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
-		}
-
 	}
 	// 動作停止
 	else if (id==0xC016) {
