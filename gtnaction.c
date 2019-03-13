@@ -55,6 +55,7 @@ struct _action_tbl {
 	int dummy1;
 	int dummy2;
 	int dummy3;
+	char cmd[40];		// 受け取った102コマンドの状態で代入するエリア
 } static action[1000];
 
 static struct timespec tim_start;
@@ -68,6 +69,7 @@ static struct timespec tim_start;
 #define	CAN_SPLIT_START		0x2B		// 分割ﾃﾞｰﾀ 先頭ﾌﾚｰﾑ
 #define	CAN_SPLIT_PROC		0x2C		// 分割ﾃﾞｰﾀ 転送中
 #define CAN_SPLIT_END		0x2D		// 分割ﾃﾞｰﾀ 最終ﾌﾚｰﾑ
+#define	CAN_TNET_CMD_START	0x1E		// ｼｰｹﾝｽ動作開始
 
 // データの種類
 #define	INFO_C101_MSG	0x12	// 設定ﾃﾞｰﾀ
@@ -189,6 +191,38 @@ static int can_dc_conf_send(int can, char *buf)
 	return 0;
 }
 
+// スレーブへ1つの動作を送信する
+static int can_action_send(int can, unsigned char datnum, struct _action_tbl *act)
+{
+	unsigned char sid    = (unsigned char)act->node+0x10;
+	unsigned char repnum = 101;		//　とりあえず101を入れるが要調査
+	unsigned char datident;
+	int i, ret;
+
+	ret = can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C102_MSG, datnum);
+	if (ret) return -1;
+
+	for (i=0; i<9; i++) {
+		if (i==0) {
+			datident = CAN_SPLIT_START;
+		}
+		else if (i==8) {
+			datident = CAN_SPLIT_END;
+		}
+		else{
+			datident = CAN_SPLIT_PROC;
+		}
+		ret = can_jigfmt_send(can, sid, repnum, datident, act->cmd[(i*4)+0], act->cmd[(i*4)+1], act->cmd[(i*4)+2], act->cmd[(i*4)+3]);
+		if (ret) return -1;
+	}
+
+	/* 開始コマンドを送る */
+	ret = can_jigfmt_send(can, sid, repnum, CAN_TNET_CMD_START, 0, 0, 0, 0);
+	if (ret) return -1;
+
+	return 0;
+}
+
 // CRC計算
 static unsigned char calc_crc(char *sbuf, int size)
 {
@@ -302,6 +336,8 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		action[seq_tbl.max_line].st_slope    = ((int)((unsigned char)buf[20])<<8) + (int)((unsigned char)buf[21]);
 		action[seq_tbl.max_line].ed_slope    = ((int)((unsigned char)buf[22])<<8) + (int)((unsigned char)buf[23]);
 		action[seq_tbl.max_line].ratio       = ((int)((unsigned char)buf[24])<<8) + (int)((unsigned char)buf[25]);
+		memset(action[seq_tbl.max_line].cmd, 0xff, sizeof(action[seq_tbl.max_line].cmd));
+		memcpy(action[seq_tbl.max_line].cmd, buf, 0x22);
 		seq_tbl.max_line++;
 	}
 	// 動作準備
@@ -351,42 +387,53 @@ static int sequence(int sock, int can)
 
 	switch (action[seq_tbl.current].act) {
 	case 0x01:		// DCモーター初期化
-		break;
 	case 0x02:		// DCモーターCW(回転時間指定)
-		break;
 	case 0x03:		// DCモーターCW(STEPセンサーまで回転)
-		break;
 	case 0x04:		// DCモーターCCW(回転時間指定)
-		break;
 	case 0x05:		// DCモーターCCW(HOMEセンサーまで回転)
+		{
+			unsigned char mno;
+			switch (action[seq_tbl.current].mno) {
+			case 1: mno = SEQ_CTL_REC_DCM_1; break;
+			case 2: mno = SEQ_CTL_REC_DCM_2; break;
+			default: mno = SEQ_CTL_REC_DCM_3; break;
+			}
+			if (can_action_send(can, mno, &action[seq_tbl.current])) {
+				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
+				message(sock, seq_tbl.my_thread_no, 1, 1, str);
+				seq_tbl.run = 0;
+			}
+			seq_tbl.current++;
+		}
 		break;
 	case 0x11:		// パルスモーター初期化
-		break;
 	case 0x12:		// パルスモーターCW(相対パルス指定)
-		break;
 	case 0x13:		// パルスモーターCCW(相対パルス指定)
-		break;
 	case 0x14:		// パルスモーターHOME(現在位置パルス分をCCW回転する)
-		break;
 	case 0x15:		// パルスモーター絶対パルス移動
-		break;
 	case 0x16:		// パルスモーター停止までまつ
-		break;
 	case 0x17:		// パルスモーター励磁解除
-		break;
 	case 0x18:		// パルスモーター励磁ON
-		break;
-	case 0x31:		// パルスモーターI/O指定ビットON
-		break;
-	case 0x32:		// パルスモーターI/O指定ビットOFF
-		break;
-	case 0x33:		// パルスモーターI/O指定ビットをONまでまつ
-		break;
-	case 0x34:		// パルスモーターI/O指定ビットをOFFまでまつ
-		break;
-	case 0x35:		// パルスモーターI/O 16bitデータ書き込み
-		break;
-	case 0x36:		// パルスモーターI/O 16bitデータ読み込んで表示
+//	case 0x31:		// パルスモーターI/O指定ビットON
+//	case 0x32:		// パルスモーターI/O指定ビットOFF
+//	case 0x33:		// パルスモーターI/O指定ビットをONまでまつ
+//	case 0x34:		// パルスモーターI/O指定ビットをOFFまでまつ
+//	case 0x35:		// パルスモーターI/O 16bitデータ書き込み
+//	case 0x36:		// パルスモーターI/O 16bitデータ読み込んで表示
+		{
+			unsigned char mno;
+			switch (action[seq_tbl.current].mno) {
+			case 1: mno = SEQ_CTL_REC_PSM_1; break;
+			case 2: mno = SEQ_CTL_REC_PSM_2; break;
+			default: mno = SEQ_CTL_REC_PSM_3; break;
+			}
+			if (can_action_send(can, mno, &action[seq_tbl.current])) {
+				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
+				message(sock, seq_tbl.my_thread_no, 1, 1, str);
+				seq_tbl.run = 0;
+			}
+			seq_tbl.current++;
+		}
 		break;
 	case 0x41:		// DIO指定ビットON
 		break;
@@ -415,10 +462,10 @@ static int sequence(int sock, int can)
 		break;
 	case 0x55:		// 指定行へ移動
         	for (i=0; i<seq_tbl.max_line; i++) {
-			if (action[seq_tbl.current].move_pulse==action[i].line) {
-				seq_tbl.current = i;
-                		break;
-            		}
+				if (action[seq_tbl.current].move_pulse==action[i].line) {
+					seq_tbl.current = i;
+                	break;
+            	}
         	}
 		break;
 	case 0x56:		// SIO送信
