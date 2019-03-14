@@ -30,20 +30,21 @@ static char msg_msg_data[] = {STX, 0x29,0x00,0x00,0xC9,0x99,1,1,1,2,2,2,2,2,2,2,
 
 // 動作管理テーブル
 struct _seq_tbl {
-	int run;			// 0:停止 1:実行中
-	int count;			// 動作中の繰り返し回数
-	int current;		// 動作中のカレント行番号
-	int max_line;		// actionテーブルの最大行数
-	int my_thread_no;	// コンソールから受け取ったスレッド番号
-	int run_times;		// コンソールから受け取った繰り返し回数
-	int reg_flag;		// レジスタ読み込み値の保存
+	int run;					// 0:停止 1:実行中
+	int count;					// 動作中の繰り返し回数
+	int current;				// 動作中のカレント行番号
+	int max_line;				// actionテーブルの最大行数
+	int my_thread_no;			// コンソールから受け取ったスレッド番号
+	int run_times;				// コンソールから受け取った繰り返し回数
+	int reg_flag;				// レジスタ読み込み値の保存
+	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O読み込み中 12:I/Oデータ受信中
 } static seq_tbl={0,0,0,0,0,0,0};
 
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
 	int line;
-	int node;
+	int slvno;
 	int mno;
 	int act;
 	unsigned long move_pulse;
@@ -194,7 +195,7 @@ static int can_dc_conf_send(int can, char *buf)
 // スレーブへ1つの動作を送信する
 static int can_action_send(int can, int count, unsigned char datnum, struct _action_tbl *act)
 {
-	unsigned char sid    = (unsigned char)act->node+0x10;
+	unsigned char sid    = (unsigned char)act->slvno+0x10;
 	unsigned char repnum = 100 + (count%125);	// 100からの通し番号を入れたいとの事だが...
 	unsigned char datident;
 	int i, ret;
@@ -327,7 +328,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	// 動作シーケンス
 	else if (id==0xC102) {
 		action[seq_tbl.max_line].line        = ((int)((unsigned char)buf[6])<<8) + (int)((unsigned char)buf[7]);
-		action[seq_tbl.max_line].node        = (int)((unsigned char)buf[8]);
+		action[seq_tbl.max_line].slvno       = (int)((unsigned char)buf[8]);
 		action[seq_tbl.max_line].mno         = (int)((unsigned char)buf[9]);
 		action[seq_tbl.max_line].act         = ((int)((unsigned char)buf[10])<<8) + (int)((unsigned char)buf[11]);
 		action[seq_tbl.max_line].move_pulse  = ((unsigned long)((unsigned char)buf[12])<<24) + ((unsigned long)((unsigned char)buf[13])<<16) + ((unsigned long)((unsigned char)buf[14])<<8) + (unsigned long)((unsigned char)buf[15]);
@@ -398,10 +399,19 @@ static int sequence(int sock, int can)
 			case 2: mno = SEQ_CTL_REC_DCM_2; break;
 			default: mno = SEQ_CTL_REC_DCM_3; break;
 			}
+			/* スレーブが動作中の場合は動作を待つ */	
+			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
+				usleep(50000);
+				break;
+			}
+			/* Action */
 			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
 				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
+			}
+			else{
+				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=2;
 			}
 			seq_tbl.current++;
 		}
@@ -427,10 +437,19 @@ static int sequence(int sock, int can)
 			case 2: mno = SEQ_CTL_REC_PSM_2; break;
 			default: mno = SEQ_CTL_REC_PSM_3; break;
 			}
+			/* スレーブが動作中の場合は動作を待つ */	
+			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
+				usleep(50000);
+				break;
+			}
+			/* Action */
 			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
 				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
+			}
+			else{
+				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=1;
 			}
 			seq_tbl.current++;
 		}
@@ -532,10 +551,27 @@ static int execute(int sock, int can)
 			struct can_frame frame;
 			int len = read(can, &frame, sizeof(frame));
 			if (len==sizeof(frame)) {
-//  *p_id = frame.can_id;
-//  *p_dlc = frame.can_dlc;
-//  memcpy(data, frame.data, CAN_MAX_DLEN);
-		printf("%s %d %d\n", __FILE__,__LINE__,len);
+				// Actionの戻りを受信する
+				if (seq_tbl.run && frame.can_id>0x10) {
+					int rid=frame.can_id-0x10;
+					switch (seq_tbl.slv_busy[rid]) {
+					case 1:		// PPM Busy
+						seq_tbl.slv_busy[rid]=0;
+						break;
+					case 2:		// DC Busy
+						seq_tbl.slv_busy[rid]=0;
+						break;
+					case 11:	// I/O Busy
+						seq_tbl.slv_busy[rid]=12;
+						break;
+					case 12:	// I/Oデータ受信中
+						seq_tbl.slv_busy[rid]=0;
+						break;
+					default:
+						break;
+					}
+				}
+		printf("%s %d %d %X\n", __FILE__,__LINE__,seq_tbl.run,frame.can_id);
 			}
 		}
 
