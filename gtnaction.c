@@ -496,7 +496,7 @@ static int sequence(int sock, int can)
 		// 終了
 		if (seq_tbl.count >= seq_tbl.run_times) {
 			seq_tbl.run = 0;
-			message(sock, seq_tbl.my_thread_no, 1, 1, "Action success!!");
+			message(sock, seq_tbl.my_thread_no, 1, 1, "success!!");
 		}
 		// Next
 		else{

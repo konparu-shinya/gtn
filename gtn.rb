@@ -2784,7 +2784,7 @@ Gtk.timeout_add( 200 ) do
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
 
     # ベース画面の各状態をstopに
-    $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0 && line == 1 && ( msg == 'Action success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+    $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
 
     # Action画面のステータス
     if my_no > 0 && dsp == 1 && msg && $main_form.console_opened[ my_no ]
