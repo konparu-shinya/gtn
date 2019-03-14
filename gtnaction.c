@@ -308,7 +308,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
 
 	// パルスモーター設定
-	if (id==0xC101 && can>=0) {
+	if (id==0xC101 && can>=0 && seq_tbl.run==0) {
 		if (can_ppm_conf_send(can, buf)) {
 			param_err = -1;
 		}
@@ -317,7 +317,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		}
 	}
 	// DCモーター設定
-	else if (id==0xC103 && can>=0) {
+	else if (id==0xC103 && can>=0 && seq_tbl.run==0) {
 		if (can_dc_conf_send(can, buf)) {
 			param_err = -1;
 		}
@@ -326,7 +326,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		}
 	}
 	// 動作シーケンス
-	else if (id==0xC102) {
+	else if (id==0xC102 && seq_tbl.run==0) {
 		action[seq_tbl.max_line].line        = ((int)((unsigned char)buf[6])<<8) + (int)((unsigned char)buf[7]);
 		action[seq_tbl.max_line].slvno       = (int)((unsigned char)buf[8]);
 		action[seq_tbl.max_line].mno         = (int)((unsigned char)buf[9]);
@@ -342,7 +342,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		seq_tbl.max_line++;
 	}
 	// 動作準備
-	else if (id==0xC014) {
+	else if (id==0xC014 && seq_tbl.run==0) {
 		memset(&seq_tbl, 0, sizeof(seq_tbl));
 		seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
 		message(sock, seq_tbl.my_thread_no, 1, 1, "START");
@@ -350,7 +350,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		message(sock, seq_tbl.my_thread_no, 1, 3, "");
 	}
 	// 動作開始
-	else if (id==0xC015) {
+	else if (id==0xC015 && seq_tbl.run==0) {
 		if (can<0) {
 			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
 		}
@@ -366,7 +366,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		}
 	}
 	// 動作停止
-	else if (id==0xC016) {
+	else if (id==0xC016 && seq_tbl.run) {
 		seq_tbl.run = 0;
 		sprintf(str, "STOP 行番号 = %d", action[seq_tbl.current].line);
 		message(sock, seq_tbl.my_thread_no, 1, 1, str);
