@@ -442,8 +442,12 @@ static int sequence(int sock, int can)
 				usleep(50000);
 				break;
 			}
+			/* パルスモーター停止までまつ */
+			if (action[seq_tbl.current].act==0x16) {
+				// 何もしない
+			}
 			/* Action */
-			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
+			else if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
 				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
