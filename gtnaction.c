@@ -511,6 +511,22 @@ static int sequence(int sock, int can)
 
 	// 終了判定
 	if (seq_tbl.current >= seq_tbl.max_line) {
+		/* 経過時間を表示する */
+		time_t msec;
+		long sec;
+		struct timespec tim_end;
+		clock_gettime(CLOCK_MONOTONIC, &tim_end);
+		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
+			tim_end.tv_nsec += 1000000000;
+			tim_end.tv_sec  -= 1;
+		}
+		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
+		sec  = tim_end.tv_sec - tim_start.tv_sec;
+
+		sprintf(str, "Loop:%d Time:%lu.%lu秒", seq_tbl.count+1, sec, msec/100);
+		message(sock, seq_tbl.my_thread_no, 1, 2, str);
+
+
 		seq_tbl.count++;
 		// 終了
 		if (seq_tbl.count >= seq_tbl.run_times) {
@@ -519,21 +535,7 @@ static int sequence(int sock, int can)
 		}
 		// Next
 		else{
-			uint64_t msec, sec;
-			struct timespec tim_end;
-
 			seq_tbl.current = 0;
-
-			clock_gettime(CLOCK_MONOTONIC, &tim_end);
-			if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
-				tim_end.tv_nsec += 1000000000;
-				tim_end.tv_sec  -= 1;
-			}
-			msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
-			sec  = tim_end.tv_sec - tim_start.tv_sec;
-
-			sprintf(str, "Loop:%d Time:%lu.%lu秒", seq_tbl.count, sec, msec/100);
-			message(sock, seq_tbl.my_thread_no, 1, 1, str);
 		}
 	}
 
