@@ -192,10 +192,10 @@ static int can_dc_conf_send(int can, char *buf)
 }
 
 // スレーブへ1つの動作を送信する
-static int can_action_send(int can, unsigned char datnum, struct _action_tbl *act)
+static int can_action_send(int can, int count, unsigned char datnum, struct _action_tbl *act)
 {
 	unsigned char sid    = (unsigned char)act->node+0x10;
-	unsigned char repnum = 101;		//　とりあえず101を入れるが要調査
+	unsigned char repnum = 100 + (count%125);	// 100からの通し番号を入れたいとの事だが...
 	unsigned char datident;
 	int i, ret;
 
@@ -398,7 +398,7 @@ static int sequence(int sock, int can)
 			case 2: mno = SEQ_CTL_REC_DCM_2; break;
 			default: mno = SEQ_CTL_REC_DCM_3; break;
 			}
-			if (can_action_send(can, mno, &action[seq_tbl.current])) {
+			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
 				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
@@ -427,7 +427,7 @@ static int sequence(int sock, int can)
 			case 2: mno = SEQ_CTL_REC_PSM_2; break;
 			default: mno = SEQ_CTL_REC_PSM_3; break;
 			}
-			if (can_action_send(can, mno, &action[seq_tbl.current])) {
+			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
 				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
