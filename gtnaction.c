@@ -406,7 +406,7 @@ static int sequence(int sock, int can)
 			}
 			/* Action */
 			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
-				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
+				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
 			}
@@ -448,7 +448,7 @@ static int sequence(int sock, int can)
 			}
 			/* Action */
 			else if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
-				sprintf(str, "ERR 行番号 = %d CAN通信エラー", action[seq_tbl.current].line);
+				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
 				message(sock, seq_tbl.my_thread_no, 1, 1, str);
 				seq_tbl.run = 0;
 			}
