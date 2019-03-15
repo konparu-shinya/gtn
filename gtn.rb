@@ -1663,14 +1663,6 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       end
     end
 
-    # double click
-    @treeview.signal_connect("row-activated") do |widget, path, column|
-      widget.selection.selected_each do |model, path, iter|
-        change_line_no( iter.get_value(0).to_i )
-        break
-      end
-    end
-
     btnDelete.signal_connect( 'clicked' ){ delete_clicked }
     btnReNo.signal_connect( 'clicked' ){ reno_clicked }
     btnPWrite.signal_connect( 'clicked' ){ ppm_write_clicked }
