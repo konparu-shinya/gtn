@@ -65,11 +65,11 @@ $act_hash_ppm = {
   0x16 => 'モーターの停止待ち',
   0x17 => '励磁解除',
   0x18 => '励磁ON',
-  0x31 => 'I/O Bit ON (0〜7:bit no)',
-  0x32 => 'I/O Bit OFF(0〜7:bit no)',
-  0x33 => 'I/O Bit Onを待つ',
-  0x34 => 'I/O Bit Offを待つ',
-  0x36 => 'I/O READ(確認用)=RegA'
+# 0x31 => 'I/O Bit ON (0〜7:bit no)',
+# 0x32 => 'I/O Bit OFF(0〜7:bit no)',
+# 0x33 => 'I/O Bit Onを待つ',
+# 0x34 => 'I/O Bit Offを待つ',
+# 0x36 => 'I/O READ(確認用)=RegA'
 }
 
 $act_hash_dcm = {

@@ -37,7 +37,7 @@ struct _seq_tbl {
 	int my_thread_no;			// コンソールから受け取ったスレッド番号
 	int run_times;				// コンソールから受け取った繰り返し回数
 	int reg_flag;				// レジスタ読み込み値の保存
-	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O読み込み中 12:I/Oデータ受信中
+	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
 } static seq_tbl={0,0,0,0,0,0,0};
 
 
@@ -459,24 +459,76 @@ static int sequence(int sock, int can)
 		}
 		break;
 	case 0x41:		// DIO指定ビットON
-		break;
 	case 0x42:		// DIO指定ビットOFF
-		break;
 	case 0x43:		// DIO指定ビットをONまでまつ
-		break;
 	case 0x44:		// DIO指定ビットをOFFまでまつ
-		break;
 	case 0x45:		// DIO 32bitデータ書き込み
-		break;
 	case 0x46:		// DIO 32bitデータ読み込んで表示
+		{
+			unsigned char dno;
+			switch (action[seq_tbl.current].act) {
+			case 0x41: dno = SEQ_CTL_REC_DO_1; break;
+			case 0x42: dno = SEQ_CTL_REC_DO_1; break;
+			case 0x43: dno = SEQ_CTL_REC_DI_1; break;
+			case 0x44: dno = SEQ_CTL_REC_DI_1; break;
+			case 0x45: dno = SEQ_CTL_REC_DO_32; break;
+			default: dno = SEQ_CTL_REC_DI_32; break;
+			}
+			/* スレーブが動作中の場合は動作を待つ */	
+			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
+				usleep(500);
+				break;
+			}
+			/* Action */
+			if (can_action_send(can, seq_tbl.current, dno, &action[seq_tbl.current])) {
+				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
+				message(sock, seq_tbl.my_thread_no, 1, 1, str);
+				seq_tbl.run = 0;
+			}
+			/* DIO 32bitデータ読み込んで表示 */
+			else if (action[seq_tbl.current].act==0x46) {
+				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=12;
+			}
+			/* DIO 32bitデータ読み込んで表示 以外 */
+			else{
+				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=11;
+			}
+			/* 	I/Oは動作完了するまで進めないのでコメントにする */
+			//seq_tbl.current++;
+		}
 		break;
 	case 0x51:		// 指定時間まち(×10msec)
 		usleep(action[seq_tbl.current].move_pulse*1000);
 		seq_tbl.current++;
 		break;
 	case 0x52:		// if文
+		/* 条件が揃えば指定行へ */
+		if (((unsigned short)seq_tbl.reg_flag & (unsigned short)action[seq_tbl.current].start_pulse)==(unsigned short)action[seq_tbl.current].max_pulse) {
+       		for (i=0; i<seq_tbl.max_line; i++) {
+				if (action[seq_tbl.current].move_pulse==action[i].line) {
+					seq_tbl.current = i;
+    	           	break;
+        	   	}
+       		}
+		}
+		/* 次の行へ */
+		else{
+			seq_tbl.current++;
+		}
 		break;
 	case 0x53:		// unless文
+		if (((unsigned short)seq_tbl.reg_flag & (unsigned short)action[seq_tbl.current].start_pulse)!=(unsigned short)action[seq_tbl.current].max_pulse) {
+       		for (i=0; i<seq_tbl.max_line; i++) {
+				if (action[seq_tbl.current].move_pulse==action[i].line) {
+					seq_tbl.current = i;
+    	           	break;
+        	   	}
+       		}
+		}
+		/* 次の行へ */
+		else{
+			seq_tbl.current++;
+		}
 		break;
 	case 0x54:		// 最終行へ移動
 		if (seq_tbl.max_line>0) {
@@ -484,12 +536,12 @@ static int sequence(int sock, int can)
 		}
 		break;
 	case 0x55:		// 指定行へ移動
-        	for (i=0; i<seq_tbl.max_line; i++) {
-				if (action[seq_tbl.current].move_pulse==action[i].line) {
-					seq_tbl.current = i;
-                	break;
-            	}
-        	}
+       	for (i=0; i<seq_tbl.max_line; i++) {
+			if (action[seq_tbl.current].move_pulse==action[i].line) {
+				seq_tbl.current = i;
+               	break;
+           	}
+       	}
 		break;
 	case 0x56:		// SIO送信
 		break;
@@ -509,7 +561,7 @@ static int sequence(int sock, int can)
 	case 0x71:		// A/D取り込み
 		break;
 	default:
-		seq_tbl.count++;
+		seq_tbl.current++;
 		break;
 	}
 
@@ -549,7 +601,7 @@ static int sequence(int sock, int can)
 // 全体の実行処理
 static int execute(int sock, int can)
 {
-	char buf[512];
+	char buf[512], str[32];
 
 	while (1) {
 		// CAN Sokcet
@@ -568,10 +620,21 @@ static int execute(int sock, int can)
 						seq_tbl.slv_busy[rid]=0;
 						break;
 					case 11:	// I/O Busy
-						seq_tbl.slv_busy[rid]=12;
-						break;
-					case 12:	// I/Oデータ受信中
 						seq_tbl.slv_busy[rid]=0;
+						seq_tbl.current++;
+						break;
+					case 12:	// I/O Read Req
+						seq_tbl.slv_busy[rid]=13;
+						break;
+					case 13:	// I/O Data Transfer 
+						seq_tbl.reg_flag=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
+						sprintf(str, "Port %d-%d = %02X%02X %02X%02Xh", action[seq_tbl.current].slvno, action[seq_tbl.current].mno,
+																		(unsigned char)(frame.data[4]), (unsigned char)(frame.data[5]),
+																		(unsigned char)(frame.data[6]), (unsigned char)(frame.data[7]));
+						message(sock, seq_tbl.my_thread_no, 1, 3, str);
+
+						seq_tbl.slv_busy[rid]=0;
+						seq_tbl.current++;
 						break;
 					default:
 						break;
