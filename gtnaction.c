@@ -36,7 +36,7 @@ struct _seq_tbl {
 	int max_line;				// actionテーブルの最大行数
 	int my_thread_no;			// コンソールから受け取ったスレッド番号
 	int run_times;				// コンソールから受け取った繰り返し回数
-	int reg_flag;				// レジスタ読み込み値の保存
+	int reg_value;				// レジスタ読み込み値の保存
 	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
 } static seq_tbl={0,0,0,0,0,0,0};
 
@@ -303,26 +303,26 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 // コマンド受信処理
 static int dispatch(int sock, char *buf, int can)
 {
-static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
+static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	char str[32];
 	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0 && seq_tbl.run==0) {
 		if (can_ppm_conf_send(can, buf)) {
-			param_err = -1;
+			local_param_err = -1;
 		}
 		else{
-			param_err = 0;
+			local_param_err = 0;
 		}
 	}
 	// DCモーター設定
 	else if (id==0xC103 && can>=0 && seq_tbl.run==0) {
 		if (can_dc_conf_send(can, buf)) {
-			param_err = -1;
+			local_param_err = -1;
 		}
 		else{
-			param_err = 0;
+			local_param_err = 0;
 		}
 	}
 	// 動作シーケンス
@@ -343,7 +343,10 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	}
 	// 動作準備
 	else if (id==0xC014 && seq_tbl.run==0) {
+		int local_reg_value=seq_tbl.reg_value;			// レジスタ値を保存
 		memset(&seq_tbl, 0, sizeof(seq_tbl));
+
+		seq_tbl.reg_value    = local_reg_value;			// Step実行に備えてレジスタ値を復元
 		seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
 		message(sock, seq_tbl.my_thread_no, 1, 1, "START");
 		message(sock, seq_tbl.my_thread_no, 1, 2, "");
@@ -354,7 +357,7 @@ static int param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 		if (can<0) {
 			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
 		}
-		else if (param_err) {
+		else if (local_param_err) {
 			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR DC/PPM Param Send Error");
 		}
 		else{
@@ -503,7 +506,7 @@ static int sequence(int sock, int can)
 		break;
 	case 0x52:		// if文
 		/* 条件が揃えば指定行へ */
-		if (((unsigned short)seq_tbl.reg_flag & (unsigned short)action[seq_tbl.current].start_pulse)==(unsigned short)action[seq_tbl.current].max_pulse) {
+		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)==(unsigned short)action[seq_tbl.current].max_pulse) {
        		for (i=0; i<seq_tbl.max_line; i++) {
 				if (action[seq_tbl.current].move_pulse==action[i].line) {
 					seq_tbl.current = i;
@@ -517,7 +520,7 @@ static int sequence(int sock, int can)
 		}
 		break;
 	case 0x53:		// unless文
-		if (((unsigned short)seq_tbl.reg_flag & (unsigned short)action[seq_tbl.current].start_pulse)!=(unsigned short)action[seq_tbl.current].max_pulse) {
+		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)!=(unsigned short)action[seq_tbl.current].max_pulse) {
        		for (i=0; i<seq_tbl.max_line; i++) {
 				if (action[seq_tbl.current].move_pulse==action[i].line) {
 					seq_tbl.current = i;
@@ -627,7 +630,7 @@ static int execute(int sock, int can)
 						seq_tbl.slv_busy[rid]=13;
 						break;
 					case 13:	// I/O Data Transfer 
-						seq_tbl.reg_flag=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
+						seq_tbl.reg_value=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
 						sprintf(str, "Port %d-%d = %02X%02X %02X%02Xh", action[seq_tbl.current].slvno, action[seq_tbl.current].mno,
 																		(unsigned char)(frame.data[4]), (unsigned char)(frame.data[5]),
 																		(unsigned char)(frame.data[6]), (unsigned char)(frame.data[7]));
