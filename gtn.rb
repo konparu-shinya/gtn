@@ -1237,7 +1237,7 @@ end
 # 動作プログラムの入力
 class Input
 
-  attr_accessor :lblStatus
+  attr_accessor :lblStatus, :treeview
 
   def initialize( arg )
     @my_console_no = arg.to_i
@@ -1645,7 +1645,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     # スクロール幅の確保
     (1..20).each { |i| table.attach( Gtk::Label.new( " " ),  0, 1, i+2, i+3 ) }
     table.attach( @edtTitle,               1,  7,  0,  1 )
-    table.attach( btnComReset,            13, 15,  0,  1 )
+#   table.attach( btnComReset,            13, 15,  0,  1 )
     table.attach( start_func,              1, 11,  1,  2 )
     table.attach( Gtk::Label.new( msg ),   1,  6,  3,  4 )
     table.attach( sw,                      1, 15,  4, 24 )
@@ -2131,7 +2131,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @treeview.selection.selected_each { |model, path, iter| cur_ary.push iter.get_value(0).to_i }
 
     if cur_ary[0]
-      execute( cur_ary[0], cur_ary[-1] )
+      execute( cur_ary[0], cur_ary[-1], 0 )
       # main formへline通知
       $main_form.start[ @my_console_no-1 ].set_value( cur_ary[0] )
       $main_form.stop[ @my_console_no-1 ].set_value( cur_ary[-1] )
@@ -2147,33 +2147,22 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
 
   # Step(次)
   def step_clicked
-    # More(もう一度)
-    cur = more_clicked
-
-    return unless cur
-
-    # TreeViewから次の行を探す
-    iter = @treeview.model.iter_first
-    begin
-      # 見つけたらカーソル移動
-      if iter.get_value(0).to_i > cur
-        @treeview.selection.select_iter(iter)
-        break
-      # カーソル未選択
-      else
-        @treeview.selection.unselect_iter(iter)
-      end
-    end while iter.next!
+    cur_line_exec( 1 )
   end
 
   # More(もう一度)
   def more_clicked
+    cur_line_exec( 0 )
+  end
+
+  # Step/More実行
+  def cur_line_exec( mode )
     # 実行行を取得
     cur_ary = []
     @treeview.selection.selected_each { |model, path, iter| cur_ary.push iter.get_value(0).to_i }
 
     if cur_ary[0]
-      execute( cur_ary[0], cur_ary[0] )
+      execute( cur_ary[0], cur_ary[0], mode )
     else
       @lblStatus[0].set_text( "実行行が選ばれていません" )
       # 赤文字
@@ -2243,7 +2232,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     end
   end
 
-  def execute ( start_line, stop_line )
+  def execute ( start_line, stop_line, mode )
     # Actionが停止であることを確認する
     return if $main_form.status[ @my_console_no-1 ].text != "stop"
 
@@ -2330,7 +2319,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       end
       # ActionプロセスへSTART要求
       $main_form.status[ @my_console_no-1 ].set_text "run"
-      $sock_port.nt_send( [STX, 0x11, 0x00, 0x00, 0xC015, @my_console_no, @spnBtnTimes.value_as_int, 0, 0, 0, 0, ETX], 'C4nCNn3C2' )
+      $sock_port.nt_send( [STX, 0x11, 0x00, mode, 0xC015, @my_console_no, @spnBtnTimes.value_as_int, 0, 0, 0, 0, ETX], 'C4nCNn3C2' )
     else
       @lblStatus[0].set_text( "Socket送受信エラー!!" )
       # 赤文字
@@ -2813,6 +2802,32 @@ Gtk.timeout_add( 200 ) do
         style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
         $main_form.console_opened[ my_no ].lblStatus[ line-1 ].style = style
       end
+
+    # 次の行番号
+    elsif my_no > 0 && dsp == 2 && msg && $main_form.console_opened[ my_no ]
+      eline = msg.to_i
+
+      # 実行行を取得
+      if eline < 1
+        cur_ary = []
+        $main_form.console_opened[ my_no ].treeview.selection.selected_each { |model, path, iter| cur_ary.push iter.get_value(0).to_i }
+        eline = cur_ary[0] if cur_ary[0]
+      else
+        eline -= 1
+      end
+
+      # TreeViewから指定行を探す
+      iter = $main_form.console_opened[ my_no ].treeview.model.iter_first
+      begin
+        # 見つけたらカーソル移動
+        if iter.get_value(0).to_i > eline
+          $main_form.console_opened[ my_no ].treeview.selection.select_iter(iter)
+          break
+        # カーソル未選択
+        else
+          $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)
+        end
+      end while iter.next!
     end
   end
   true

@@ -36,9 +36,11 @@ struct _seq_tbl {
 	int max_line;				// actionテーブルの最大行数
 	int my_thread_no;			// コンソールから受け取ったスレッド番号
 	int run_times;				// コンソールから受け取った繰り返し回数
+	int ret_mode;				// 1:Step実行(動作終了時に次のlineを送信する)
+	int ret_line;				// Step実行の動作終了時に送るlineの値
 	int reg_value;				// レジスタ読み込み値の保存
 	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
-} static seq_tbl={0,0,0,0,0,0,0};
+} static seq_tbl={0,0,0,0,0,0,0,0,0};
 
 
 // 動作シーケンス格納テーブル
@@ -361,6 +363,7 @@ static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR DC/PPM Param Send Error");
 		}
 		else{
+			seq_tbl.ret_mode     = (int)((unsigned char)buf[3]);
 			seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
 			seq_tbl.run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
 			seq_tbl.run          = 1;
@@ -383,12 +386,55 @@ static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 	return 0;
 }
 
+// シーケンスの終了確認
+static int check_finish(int sock)
+{
+	char str[32];
+
+	/* まず終了判定 */
+	if (seq_tbl.current >= seq_tbl.max_line) {
+		/* 経過時間を表示する */
+		time_t msec;
+		long sec;
+		struct timespec tim_end;
+		clock_gettime(CLOCK_MONOTONIC, &tim_end);
+		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
+			tim_end.tv_nsec += 1000000000;
+			tim_end.tv_sec  -= 1;
+		}
+		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
+		sec  = tim_end.tv_sec - tim_start.tv_sec;
+
+		sprintf(str, "Loop:%d Time:%lu.%lu秒", seq_tbl.count+1, sec, msec/100);
+		message(sock, seq_tbl.my_thread_no, 1, 2, str);
+
+
+		seq_tbl.count++;
+		// 終了
+		if (seq_tbl.count >= seq_tbl.run_times) {
+			seq_tbl.run = 0;
+			message(sock, seq_tbl.my_thread_no, 1, 1, "success!!");
+			/* 次の行番号を送る */
+			if (seq_tbl.ret_mode) {
+				sprintf(str, "%d", seq_tbl.ret_line);
+				message(sock, seq_tbl.my_thread_no, 2, 0, str);
+			}
+		}
+		// Next
+		else{
+			seq_tbl.current = 0;
+		}
+	}
+	return 0;
+}
+
 // シーケンス
 static int sequence(int sock, int can)
 {
     int i;
 	char str[32];
 
+	seq_tbl.ret_line=0;
 	switch (action[seq_tbl.current].act) {
 	case 0x01:		// DCモーター初期化
 	case 0x02:		// DCモーターCW(回転時間指定)
@@ -507,12 +553,18 @@ static int sequence(int sock, int can)
 	case 0x52:		// if文
 		/* 条件が揃えば指定行へ */
 		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)==(unsigned short)action[seq_tbl.current].max_pulse) {
+			seq_tbl.ret_line=action[seq_tbl.current].move_pulse;
+			/* goto先を探す */
        		for (i=0; i<seq_tbl.max_line; i++) {
 				if (action[seq_tbl.current].move_pulse==action[i].line) {
 					seq_tbl.current = i;
     	           	break;
         	   	}
        		}
+			/* goto先が見つからなければ次の行へ */
+			if (i>=seq_tbl.max_line) {
+				seq_tbl.current++;
+			}
 		}
 		/* 次の行へ */
 		else{
@@ -521,12 +573,18 @@ static int sequence(int sock, int can)
 		break;
 	case 0x53:		// unless文
 		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)!=(unsigned short)action[seq_tbl.current].max_pulse) {
+			seq_tbl.ret_line=action[seq_tbl.current].move_pulse;
+			/* goto先を探す */
        		for (i=0; i<seq_tbl.max_line; i++) {
 				if (action[seq_tbl.current].move_pulse==action[i].line) {
 					seq_tbl.current = i;
     	           	break;
         	   	}
        		}
+			/* goto先が見つからなければ次の行へ */
+			if (i>=seq_tbl.max_line) {
+				seq_tbl.current++;
+			}
 		}
 		/* 次の行へ */
 		else{
@@ -567,37 +625,6 @@ static int sequence(int sock, int can)
 		seq_tbl.current++;
 		break;
 	}
-
-	// 終了判定
-	if (seq_tbl.current >= seq_tbl.max_line) {
-		/* 経過時間を表示する */
-		time_t msec;
-		long sec;
-		struct timespec tim_end;
-		clock_gettime(CLOCK_MONOTONIC, &tim_end);
-		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
-			tim_end.tv_nsec += 1000000000;
-			tim_end.tv_sec  -= 1;
-		}
-		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
-		sec  = tim_end.tv_sec - tim_start.tv_sec;
-
-		sprintf(str, "Loop:%d Time:%lu.%lu秒", seq_tbl.count+1, sec, msec/100);
-		message(sock, seq_tbl.my_thread_no, 1, 2, str);
-
-
-		seq_tbl.count++;
-		// 終了
-		if (seq_tbl.count >= seq_tbl.run_times) {
-			seq_tbl.run = 0;
-			message(sock, seq_tbl.my_thread_no, 1, 1, "success!!");
-		}
-		// Next
-		else{
-			seq_tbl.current = 0;
-		}
-	}
-
 	return 0;
 }
 
@@ -674,6 +701,10 @@ static int execute(int sock, int can)
 			if (len==0) break;
 		}
 
+		// シーケンスの終了確認
+		if (seq_tbl.run) {
+			check_finish(sock);
+		}
 		// シーケンス
 		if (seq_tbl.run) {
 			sequence(sock, can);
