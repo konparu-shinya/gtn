@@ -1,0 +1,10 @@
+#!/bin/bash
+count=`ps -ef | grep gtnaction | grep -v grep | wc -l`
+if [ $count = 0 ]; then
+  /home/pi/gtn/gtnaction &
+else
+  echo "alive."
+fi
+
+/usr/bin/ruby /home/pi/gtn/gtn.rb
+
