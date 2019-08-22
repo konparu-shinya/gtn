@@ -261,7 +261,7 @@ end
 
 # ACTION情報の送信
 def action_info_send(console_no, ary)
-  cmd = [STX, 0x20, 0x00, 0x00, 0xC102]
+  cmd = [STX, 0x20, 0x00, console_no, 0xC102]
   cmd.push ary[0].to_i  # 行番号
   cmd.push ary[3].to_i  # ノード番号
   cmd.push ary[4].to_i  # モータ番号
