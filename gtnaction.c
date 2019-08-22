@@ -12,7 +12,6 @@
 #include <time.h>
 #include <net/if.h>
 #include <sys/wait.h>
-#include <pthread.h>
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
@@ -38,7 +37,8 @@ struct _seq_tbl {
 	int run_times;				// コンソールから受け取った繰り返し回数
 	int ret_line;				// 1:Step実行(動作終了時に次のlineを送信する)
 	int reg_flag;				// レジスタ読み込み値の保存
-	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
+	int	busy;					// 1:Wait中
+	struct timespec wai_start;	// Wait開始
 } static seq_tbl[CONSOLE_MAX]={
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
@@ -158,11 +158,6 @@ static int sequence(int sock, int no)
 	case 0x04:		// DCモーターCCW(回転時間指定)
 	case 0x05:		// DCモーターCCW(HOMEセンサーまで回転)
 		{
-			/* スレーブが動作中の場合は動作を待つ */	
-			if (pseq->slv_busy[pact->slvno]) {
-				usleep(50000);
-				break;
-			}
 #if 0
 			/* Action */
 			if (can_action_send(can, pseq->current, mno, pact)) {
@@ -192,11 +187,6 @@ static int sequence(int sock, int no)
 //	case 0x35:		// パルスモーターI/O 16bitデータ書き込み
 //	case 0x36:		// パルスモーターI/O 16bitデータ読み込んで表示
 		{
-			/* スレーブが動作中の場合は動作を待つ */	
-			if (pseq->slv_busy[pact->slvno]) {
-				usleep(50000);
-				break;
-			}
 			/* パルスモーター停止までまつ */
 			if (pact->act==0x16) {
 				// 何もしない
@@ -208,10 +198,10 @@ static int sequence(int sock, int no)
 				message(sock, no, 1, 1, str);
 				pseq->run = 0;
 			}
-#endif
 			else{
 				pseq->slv_busy[pact->slvno]=1;
 			}
+#endif
 			pseq->current++;
 		}
 		break;
@@ -222,11 +212,6 @@ static int sequence(int sock, int no)
 	case 0x45:		// DIO 32bitデータ書き込み
 	case 0x46:		// DIO 32bitデータ読み込んで表示
 		{
-			/* スレーブが動作中の場合は動作を待つ */	
-			if (pseq->slv_busy[pact->slvno]) {
-				usleep(500);
-				break;
-			}
 #if 0
 			/* Action */
 			if (can_action_send(can, pseq->current, dno, pact)) {
@@ -248,8 +233,28 @@ static int sequence(int sock, int no)
 		}
 		break;
 	case 0x51:		// 指定時間まち(×10msec)
-		usleep(pact->move_pulse*1000);
-		pseq->current++;
+		if (pseq->busy==0) {
+			pseq->busy=1;
+			clock_gettime(CLOCK_MONOTONIC, &pseq->wai_start);
+		}
+		else{
+			time_t msec;
+			long sec;
+			struct timespec tim_end;
+			clock_gettime(CLOCK_MONOTONIC, &tim_end);
+			if((tim_end.tv_nsec - pseq->wai_start.tv_nsec) < 0){
+				tim_end.tv_nsec += 1000000000;
+				tim_end.tv_sec  -= 1;
+			}
+			msec = (tim_end.tv_nsec - pseq->wai_start.tv_nsec)/1000000;
+			sec  = tim_end.tv_sec - pseq->wai_start.tv_sec;
+
+			if (((sec*1000)+msec) >= pact->move_pulse) {
+				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, sec, msec/100);
+				pseq->busy=0;
+				pseq->current++;
+			}
+		}
 		break;
 	case 0x52:		// if文
 		/* 条件が揃えば指定行へ */
@@ -355,16 +360,6 @@ static int sequence(int sock, int no)
 		}
 	}
 	return 0;
-}
-
-
-// スレッド動作
-void *thread_main(void *ptr)
-{
-	int no=*(int*)ptr;
-	int a=0;
-	printf("%s %d %d %d\n", __FILE__, __LINE__, no, a++);
-	while(1);
 }
 
 // コマンド受信処理
@@ -497,47 +492,6 @@ static int execute(int sock)
 	int i;
 
 	while (1) {
-#if 0
-		// CAN Sokcet
-		if (can>=0) {
-			struct can_frame frame;
-			int len = read(can, &frame, sizeof(frame));
-			if (len==sizeof(frame)) {
-				// Actionの戻りを受信する
-				if (seq_tbl.run && frame.can_id>0x10) {
-					int rid=frame.can_id-0x10;
-					switch (seq_tbl.slv_busy[rid]) {
-					case 1:		// PPM Busy
-						seq_tbl.slv_busy[rid]=0;
-						break;
-					case 2:		// DC Busy
-						seq_tbl.slv_busy[rid]=0;
-						break;
-					case 11:	// I/O Busy
-						seq_tbl.slv_busy[rid]=0;
-						seq_tbl.current++;
-						break;
-					case 12:	// I/O Read Req
-						seq_tbl.slv_busy[rid]=13;
-						break;
-					case 13:	// I/O Data Transfer 
-						seq_tbl.reg_flag=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
-						sprintf(str, "Port %d-%d = %02X%02X %02X%02Xh", action[seq_tbl.current].slvno, action[seq_tbl.current].mno,
-																		(unsigned char)(frame.data[4]), (unsigned char)(frame.data[5]),
-																		(unsigned char)(frame.data[6]), (unsigned char)(frame.data[7]));
-						message(sock, seq_tbl.my_thread_no, 1, 3, str);
-
-						seq_tbl.slv_busy[rid]=0;
-						seq_tbl.current++;
-						break;
-					default:
-						break;
-					}
-				}
-		printf("%s %d %d %X\n", __FILE__,__LINE__,seq_tbl.run,frame.can_id);
-			}
-		}
-#endif
 
 		// Local Sokcet
 		{
@@ -584,8 +538,7 @@ int main(void)
 	struct sockaddr_in clitSockAddr;		//client internet socket address
 	unsigned int clitLen;					//client internet socket address length
 	unsigned short servPort = 9001;			//server port number
-	int on = 1, ret, i, arg[CONSOLE_MAX];
-	pthread_t pthread_id[CONSOLE_MAX];
+	int on = 1, ret;
 
 	if ((servSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 ){
 		perror("socket() failed.");
@@ -607,12 +560,6 @@ int main(void)
 	if (listen(servSock, QUEUELIMIT) < 0) {
 		perror("listen() failed.");
 		exit(EXIT_FAILURE);
-	}
-
-	// スレッド起動
-	for (i=0; i<CONSOLE_MAX; i++) {
-		arg[i]=i;
-		pthread_create( &pthread_id[i], NULL, &thread_main, &arg[i]);
 	}
 
 	while(1) {
