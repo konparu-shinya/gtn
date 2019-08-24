@@ -2814,22 +2814,23 @@ Gtk.timeout_add( 200 ) do
     elsif my_no > 0 && dsp == 2 && msg && $main_form.console_opened[ my_no ]
       eline = msg.to_i
 
-      # 実行行を取得
-      if eline < 1
-        cur_ary = []
-        $main_form.console_opened[ my_no ].treeview.selection.selected_each { |model, path, iter| cur_ary.push iter.get_value(0).to_i }
-        eline = cur_ary[0] if cur_ary[0]
-      else
-        eline -= 1
-      end
+      list = []
+      iter = $main_form.console_opened[ my_no ].treeview.model.iter_first
+      begin
+        list.push iter.get_value(0).to_i
+      end while iter.next!
+      
+      # 最終行への処理
+      eline = list[-1] if eline < 0
 
       # TreeViewから指定行を探す
+      find = nil
       iter = $main_form.console_opened[ my_no ].treeview.model.iter_first
       begin
         # 見つけたらカーソル移動
-        if iter.get_value(0).to_i > eline
+        if (iter.get_value(0).to_i >= eline || iter.get_value(0).to_i == list[-1]) && find == nil
           $main_form.console_opened[ my_no ].treeview.selection.select_iter(iter)
-          break
+          find = true
         # カーソル未選択
         else
           $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)

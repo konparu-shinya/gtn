@@ -148,11 +148,11 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 // シーケンス
 static int sequence(int sock, int no)
 {
-	int local_ret_line=-1;
     int i;
 	char str[32];
 	struct _seq_tbl *pseq = &seq_tbl[no-1];
 	struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
+	int local_ret_line       = pact->line+1;
 
 	switch (pact->act) {
 	case 0x01:		// DCモーター初期化
@@ -262,11 +262,13 @@ static int sequence(int sock, int no)
 	case 0x52:		// if文
 		/* 条件が揃えば指定行へ */
 		if (((unsigned short)pseq->reg_flag & (unsigned short)pact->start_pulse)==(unsigned short)pact->max_pulse) {
+			pseq->current++;
+			local_ret_line=pact->move_pulse;
+
        		for (i=0; i<pseq->max_line; i++) {
 				struct _action_tbl *next = &action_tbl[no-1][i];
 				if (pact->move_pulse==next->line) {
 					pseq->current = i;
-					local_ret_line=next->line;
     	           	break;
         	   	}
        		}
@@ -278,11 +280,13 @@ static int sequence(int sock, int no)
 		break;
 	case 0x53:		// unless文
 		if (((unsigned short)pseq->reg_flag & (unsigned short)pact->start_pulse)!=(unsigned short)pact->max_pulse) {
+			pseq->current++;
+			local_ret_line=pact->move_pulse;
+
        		for (i=0; i<pseq->max_line; i++) {
 				struct _action_tbl *next = &action_tbl[no-1][i];
 				if (pact->move_pulse==next->line) {
 					pseq->current = i;
-					local_ret_line=next->line;
     	           	break;
         	   	}
        		}
@@ -293,11 +297,18 @@ static int sequence(int sock, int no)
 		}
 		break;
 	case 0x54:		// 最終行へ移動
-		if (pseq->max_line>0) {
+		if (pseq->max_line>0 && pseq->ret_line==0) {
 			pseq->current = pseq->max_line-1;
 		}
+		else{
+			pseq->current++;
+		}
+		local_ret_line=-1;
 		break;
 	case 0x55:		// 指定行へ移動
+		pseq->current++;
+		local_ret_line=pact->move_pulse;
+
        	for (i=0; i<pseq->max_line; i++) {
 			struct _action_tbl *next = &action_tbl[no-1][i];
 			if (pact->move_pulse==next->line) {
