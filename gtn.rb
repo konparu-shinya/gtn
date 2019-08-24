@@ -1579,7 +1579,7 @@ class Input
     # Edit Event new
     @edtEComment = Gtk::Entry.new()
     @cmbEAction  = Gtk::Combo.new()
-    spnAdjustENo = Gtk::Adjustment.new( 1, 1, 64, 1, 2, 0 )
+    spnAdjustENo = Gtk::Adjustment.new( 1, 1, 20, 1, 2, 0 )
     @spnBtnENo   = Gtk::SpinButton.new( spnAdjustENo, 0, 0 )
     btnEWrite    = Gtk::Button.new( '書込み' )
 
@@ -2537,7 +2537,7 @@ class Gtn
     return  if !File.exist?( PrjNames )
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     # 全コンソールが閉じていることを確認する
     @console_opened.each { |x| return if x }
@@ -2557,7 +2557,7 @@ class Gtn
     return if $main_form.file_tnet == nil
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     Tnet.new
   end
@@ -2568,7 +2568,7 @@ class Gtn
     return if $main_form.file_dcm == nil
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     DcmConf.new
   end
@@ -2579,7 +2579,7 @@ class Gtn
     return if $main_form.file_ppm == nil
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     Moter.new
   end
@@ -2590,7 +2590,7 @@ class Gtn
     return if $main_form.file_config == nil
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     ActCopy.new( $main_form.prj_no )
   end
@@ -2601,7 +2601,7 @@ class Gtn
     return if $main_form.file_config == nil
 
     # 全Actionが停止であることを確認する
-    @status.each { |x| return if x.text != "stop" }
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
     ActDelete.new( $main_form.prj_no )
   end
@@ -2621,18 +2621,16 @@ class Gtn
     return if $main_form.file_config == nil
 
     # 全Actionが停止であることを確認する
-    @status.each do |x|
-      return if x.text != "stop"
-    end
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
 
+    ready = []
     ( 1..@size ).each do |i|
 
       next if !@run[ i-1 ].active?
-
-=begin
       if $sock_port.open_err == nil
         # ActionプロセスへREADY要求
         $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC014, i, 0x00, ETX], 'C4nC3' )
+        ready.push i
 
         # Actionファイルを読み込む
         fname = $main_form.file_action + "#{i}" + Kakuchou_si
@@ -2649,16 +2647,19 @@ class Gtn
             end
           end
         end
-        # ActionプロセスへSTART要求
-        $sock_port.nt_send( [STX, 0x11, 0x00, 0x00, 0xC015, i, @loop[ i-1 ].value_as_int,
-                                                              @delay_no[ i-1 ].value_as_int,
-                                                              @delay_time[ i-1 ].value_as_int,
-                                                              @delay_sec[ i-1 ].value_as_int, 0, ETX], 'C4nCNn3C2' )
-        $main_form.main_sts.set_text( "" )
+        $main_form.main_sts.set_text( "RUN" )
       else
         $main_form.main_sts.set_text( "Socket送受信エラー!!" )
       end
-=end
+    end
+
+    # ActionプロセスへSTART要求
+    ready.each do |i|
+      $sock_port.nt_send( [STX, 0x11, 0x00, 0x00, 0xC015, i, @loop[ i-1 ].value_as_int,
+                                                              @delay_no[ i-1 ].value_as_int,
+                                                              @delay_time[ i-1 ].value_as_int,
+                                                              @delay_sec[ i-1 ].value_as_int, 0, ETX], 'C4nCNn3C2' )
+      $main_form.status[ i-1 ].set_text "run"
     end
   end
 
@@ -2765,7 +2766,13 @@ Gtk.timeout_add( 200 ) do
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
 
     # ベース画面の各状態をstopに
-    $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+    if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+      $main_form.status[ my_no-1 ].set_text( 'stop' )
+      # 全てstopであれば全体ステータスを表示
+      if $main_form.status.map { |x| x.text }.uniq == ['stop']
+        $main_form.main_sts.set_text( msg )
+      end
+    end
 
     # Action画面のステータス
     if my_no > 0 && dsp == 1 && msg && $main_form.console_opened[ my_no ]

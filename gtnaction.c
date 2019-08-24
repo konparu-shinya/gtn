@@ -64,6 +64,9 @@ struct _action_tbl {
 	int dummy3;
 } static action_tbl[CONSOLE_MAX][1000];
 
+// イベント
+static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
 static struct timespec tim_start;
 
 // CRC計算
@@ -311,12 +314,22 @@ static int sequence(int sock, int no)
 		pseq->run = 0;
 		break;
 	case 0x61:		// イベントセット
+        event[pact->move_pulse-1]=1;
+		pseq->current++;
 		break;
 	case 0x62:		// イベントクリア
+        event[pact->move_pulse-1]=0;
+		pseq->current++;
 		break;
 	case 0x63:		// イベントセットまち
+        if (event[pact->move_pulse-1]) {
+		    pseq->current++;
+        }
 		break;
 	case 0x64:		// いべんとクリアまち
+        if (!event[pact->move_pulse-1]) {
+		    pseq->current++;
+        }
 		break;
 	case 0x71:		// A/D取り込み
 		break;
@@ -424,6 +437,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 		if (pseq->run==0) {
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
 			memset(pseq, 0, sizeof(seq_tbl));
+			memset(event, 0, sizeof(event));
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
 			message(sock, no, 1, 3, "");
