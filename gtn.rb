@@ -805,6 +805,9 @@ class DcmConf
       end
     end
 
+    iter = @treeview.model.iter_first
+    @treeview.selection.select_iter(iter) if iter
+
     table.show_all
     dialog.vbox.add( table )
 #   dialog.add_buttons(['閉じる', Gtk::Dialog::RESPONSE_CLOSE])
@@ -923,11 +926,11 @@ class Moter
     spnBtnHIPulse   = Gtk::SpinButton.new( spnAdjustHIPulse, 0, 0 )
     spnAdjustHA      = Gtk::Adjustment.new( 1, 0, 1, 1, 2, 0 )
     spnBtnHA        = Gtk::SpinButton.new( spnAdjustHA, 0, 0 )
-    spnAdjustHO      = Gtk::Adjustment.new( 1, 0, 1, 1, 2, 0 )
+    spnAdjustHO      = Gtk::Adjustment.new( 0, 0, 1, 1, 2, 0 )
     spnBtnHO        = Gtk::SpinButton.new( spnAdjustHO, 0, 0 )
     spnAdjustHI      = Gtk::Adjustment.new( 1, 0, 1, 1, 2, 0 )
     spnBtnHI        = Gtk::SpinButton.new( spnAdjustHI, 0, 0 )
-    spnAdjustStep    = Gtk::Adjustment.new( 1, 0, 1, 1, 2, 0 )
+    spnAdjustStep    = Gtk::Adjustment.new( 0, 0, 1, 1, 2, 0 )
     spnBtnStep      = Gtk::SpinButton.new( spnAdjustStep, 0, 0 )
     spnAdjustHome    = Gtk::Adjustment.new( 1, 0, 1, 1, 2, 0 )
     spnBtnHome      = Gtk::SpinButton.new( spnAdjustHome, 0, 0 )
@@ -1067,6 +1070,9 @@ class Moter
         treeview_add(fmt, iter)
       end
     end
+
+    iter = @treeview.model.iter_first
+    @treeview.selection.select_iter(iter) if iter
 
     table.show_all
     dialog.vbox.add( table )

@@ -447,7 +447,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 		struct _seq_tbl *pseq = &seq_tbl[no-1];
 		if (pseq->run==0) {
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
-			memset(pseq, 0, sizeof(seq_tbl));
+			memset(pseq, 0, sizeof(struct _seq_tbl));
 			memset(event, 0, sizeof(event));
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
