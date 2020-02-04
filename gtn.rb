@@ -1357,7 +1357,7 @@ class Input
     @edtPComment     = Gtk::Entry.new()
     spnAdjustNode    = Gtk::Adjustment.new( 1, 1, 64, 1, 2, 0 )
     @spnBtnNode      = Gtk::SpinButton.new( spnAdjustNode, 0, 0 )
-    spnAdjustPMNo    = Gtk::Adjustment.new( 1, 1, 64, 1, 2, 0 )
+    spnAdjustPMNo    = Gtk::Adjustment.new( 1, 1, 3, 1, 2, 0 )
     @spnBtnPMNo      = Gtk::SpinButton.new( spnAdjustPMNo, 0, 0 )
     @cmbPAction      = Gtk::Combo.new()
     spnAdjustPPulse  = Gtk::Adjustment.new( 0, -99999, 99999, 1, 2, 0 )

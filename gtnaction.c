@@ -1,7 +1,10 @@
 /********************************************************************************
  * gtn for ラズパイ のAction実行部
  *  パルスモーターコントローラー:L6470
- *  gcc -o test test.c -lwiringPi
+ *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15)
+ *                               DIO
+ *                                GPIO2(pin3) GPIO3(pin5) GPIO4(pin7) GPIO18(pin12) GPIO23(pin16) GPIO24(pin18)
+ *  gcc -o gtnaction gtnaction.c -lwiringPi
  ********************************************************************************/
 #include <stdio.h>
 #include <stdint.h>
@@ -19,12 +22,13 @@
 
 #define L6470_SPI_CHANNEL 0
 #define	GPIO17	17
-#define	GPIO18	18
-const unsigned char L6470_CH[] = {GPIO17, GPIO18, 0};
+#define	GPIO27	27
+#define	GPIO22	22
+const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
-#define	PPM_MAX	10
+#define	PPM_MAX	3
 
 #define ACK		0x06
 #define NAK		0x15
@@ -299,32 +303,74 @@ static void L6470_change_spd(unsigned char ch, int start_pulse, int max_pulse, i
 }
 
 // パルスモーターの初期化動作
-// 戻値: 0:初期化完了 1:初期化中
-static int ppm_init(int no)
+// 戻値: 0:初期化完了 1:初期化中 -1:Home Out Err -2:Home In Err
+static int ppm_init(int ch)
 {
-	if (L6470_busy(no)) return 1;
+	struct _ppm_ctrl *pctrl = &ppm_ctrl[ch];
+	int home_in_flag = ((L6470_param_read(ch, 0x19)&0x04) == 0x00)?1:0;
 
-	switch (ppm_ctrl[no].driving) {
+	if (L6470_busy(ch)) return 1;
+
+	switch (pctrl->driving) {
+	case 0:		// 0:not use
+		pctrl->speed.start=pctrl->init_pulse.init;
+		pctrl->speed.max  =pctrl->init_pulse.init;
+		pctrl->speed.acc  =1;
+		pctrl->speed.dec  =1;
+		// 初期化動作のMIN_SPEED設定。
+		L6470_param_write(ch, 0x08, pctrl->speed.start);
+		// 初期化動作のMAX_SPEED設定。
+		L6470_param_write(ch, 0x07, pctrl->speed.max);
+		// ACC設定。
+		L6470_param_write(ch, 0x05, pctrl->speed.acc);
+		// DEC設定。
+		L6470_param_write(ch, 0x06, pctrl->speed.dec);
+
+		// home out
+		if (home_in_flag) {
+			pctrl->driving=1;
+		}
+		// home in
+		else{
+			pctrl->driving=2;
+		}
+		break;
 	case 1:		// 1:init home out
-		// home out完了?
-		ppm_ctrl[no].driving=2;
+		{
+			unsigned char cmd = (pctrl->init_dir.home_out)?0x40:0x41;
+			L6470_cmd_write(ch, cmd, 3, pctrl->init_pulse.home_out);//Move
+			pctrl->driving=2;
+		}
 		break;
 	case 2:		// 2:init home in
-		// home in完了?
-		ppm_ctrl[no].driving=3;
+		{
+			unsigned char cmd = (pctrl->init_dir.home_in)?0x92:0x93;
+			/* HOMEチェック */
+			if (home_in_flag) {
+				pctrl->driving=0;
+				return -1;
+			}
+			L6470_write(ch, cmd);//ReleseSW
+			pctrl->driving=3;
+		}
 		break;
 	case 3:		// 3:init home add
-		// home add完了?
-		ppm_ctrl[no].driving=4;
+		{
+			unsigned char cmd = (pctrl->init_dir.home_in)?0x40:0x41;
+			/* HOMEチェック */
+			if (!home_in_flag) {
+				pctrl->driving=0;
+				return -2;
+			}
+			L6470_cmd_write(ch, cmd, 3, pctrl->init_pulse.home_add);//Move
+			pctrl->driving=4;
+			L6470_write(ch, 0xD8);// ResetPos
+		}
 		break;
 	default:
-		// 初期化開始
-		// センサーIN?
-		ppm_ctrl[no].driving=1;
-		ppm_ctrl[no].driving=2;
 		break;
 	}
-	return (ppm_ctrl[no].driving==4) ? 0:1;
+	return (pctrl->driving==4) ? 0:1;
 }
 
 // シーケンス
@@ -358,8 +404,20 @@ static int sequence(int sock, int no)
 		}
 		break;
 	case 0x11:		// パルスモーター初期化
-		if (ppm_init(pact->mno-1)==0) {
+		switch (ppm_init(pact->mno-1)) {
+		case 0:
 			pseq->current++;
+			break;
+		case -1:
+			pseq->run = 0;
+			message(sock, no, 1, 1, "ERR HOME Out Error");
+			break;
+		case -2:
+			pseq->run = 0;
+			message(sock, no, 1, 1, "ERR HOME In Error");
+			break;
+		default:
+			break;
 		}
 		break;
 	case 0x12:		// パルスモーターSTEP(相対パルス指定)
