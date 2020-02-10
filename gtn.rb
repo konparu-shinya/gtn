@@ -709,7 +709,7 @@ class DcmConf
     group11.attach( Gtk::Label.new( ' 使う ' ),                       2,  3, 0, 1 )
     group11.attach( Gtk::Label.new( " Home Active \n 0:L \n 1:H " ),  3,  4, 0, 1 )
     group11.attach( Gtk::Label.new( " STEP Active \n 0:L \n 1:H " ),  4,  5, 0, 1 )
-    group11.attach( Gtk::Label.new( " Home OUT ¥\ 0:CW \n 1:CCW " ),  5,  6, 0, 1 )
+    group11.attach( Gtk::Label.new( " Home OUT \n 0:CW \n 1:CCW " ),  5,  6, 0, 1 )
     group11.attach( Gtk::Label.new( " Home IN \n 0:CW \n 1:CCW " ),   6,  7, 0, 1 )
     group11.attach( Gtk::Label.new( " STEP \n 0:CW \n 1:CCW " ),      7,  8, 0, 1 )
     group11.attach( Gtk::Label.new( " HOME \n 0:CW \n 1:CCW " ),      8,  9, 0, 1 )
