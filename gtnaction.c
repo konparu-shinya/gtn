@@ -4,6 +4,8 @@
  *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15)
  *                               DIO
  *                                GPIO2(pin3) GPIO3(pin5) GPIO4(pin7) GPIO18(pin12) GPIO23(pin16) GPIO24(pin18)
+ *      R 9の設定:StepMode
+ *      R10の設定:b15-b8:KVAL_HOLD b7-b0:KVAL_RUN/KVAL_ACC/KVAL_DEC
  *  gcc -o gtnaction gtnaction.c -lwiringPi
  ********************************************************************************/
 #include <stdio.h>
@@ -228,16 +230,6 @@ static long L6470_param_read(unsigned char ch, unsigned char no)
 	return L6470_param_write(ch, 0x20|no, 0L);
 }
 
-static void L6470_softstop(unsigned char ch)
-{
-	L6470_write(ch, 0xB0);
-}
-
-static void L6470_softhiz(unsigned char ch)
-{
-	L6470_write(ch, 0xA8);
-}
-
 // L6470 駆動確認
 static int L6470_busy(unsigned char ch)
 {
@@ -253,21 +245,20 @@ static void L6470_init(unsigned char ch)
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
 	L6470_write(ch, 0xc0);
-	L6470_softstop(ch);
-	L6470_softhiz(ch);
+	L6470_write(ch, 0xB0);	// SoftStop
 
 	// MIN_SPEED設定。
 	L6470_param_write(ch, 0x08, 0x15);
 	// MAX_SPEED設定。
 	L6470_param_write(ch, 0x07, 2000);
 	// KVAL_HOLD設定。
-	L6470_param_write(ch, 0x09, 0x0f);
+	L6470_param_write(ch, 0x09, (ppm_ctrl[ch].r10>>8) & 0x0f);
 	// KVAL_RUN設定。
-	L6470_param_write(ch, 0x0A, 0xff);
+	L6470_param_write(ch, 0x0A, ppm_ctrl[ch].r10 & 0x0f);
 	// KVAL_ACC設定。
-	L6470_param_write(ch, 0x0B, 0xff);
+	L6470_param_write(ch, 0x0B, ppm_ctrl[ch].r10 & 0x0f);
 	// KVAL_DEC設定。
-	L6470_param_write(ch, 0x0C, 0xff);
+	L6470_param_write(ch, 0x0C, ppm_ctrl[ch].r10 & 0x0f);
 	// OCD_TH設定。
 	L6470_param_write(ch, 0x13, 0x0f);
 	// STALL_TH設定。
@@ -418,14 +409,12 @@ static int sequence(int sock, int no)
 		case -1:
 			pseq->run = 0;
 			message(sock, no, 1, 1, "ERR HOME Out Error");
-			L6470_softstop(pact->mno-1);
-			L6470_softhiz(pact->mno-1);
+			L6470_write(pact->mno-1, 0xB8);	// HardStop
 			break;
 		case -2:
 			pseq->run = 0;
 			message(sock, no, 1, 1, "ERR HOME In Error");
-			L6470_softstop(pact->mno-1);
-			L6470_softhiz(pact->mno-1);
+			L6470_write(pact->mno-1, 0xB8);	// HardStop
 			break;
 		default:
 			break;
@@ -471,13 +460,11 @@ static int sequence(int sock, int no)
 		}
 		break;
 	case 0x17:		// パルスモーター励磁解除
-		// KVAL_HOLD設定。
-		L6470_param_write(pact->mno-1, 0x09, 0x0);
+		L6470_write(pact->mno-1, 0xA8);	// HardHiZ
 		pseq->current++;
 		break;
 	case 0x18:		// パルスモーター励磁ON
-		// KVAL_HOLD設定。
-		L6470_param_write(pact->mno-1, 0x09, 0x0f);
+		L6470_write(pact->mno-1, 0xB0);	// SoftStop
 		pseq->current++;
 		break;
 //	case 0x31:		// パルスモーターI/O指定ビットON
@@ -807,8 +794,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 		// パルスモーター強制停止
 		for (i=0; ;i++) {
 			if (L6470_CH[i]>0) {
-				L6470_softstop(i);
-				L6470_softhiz(i);
+				L6470_write(i, 0xB8);	// HardStop
 			}
 			else{
 				break;
