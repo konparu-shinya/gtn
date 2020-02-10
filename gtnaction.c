@@ -79,7 +79,7 @@ struct _action_tbl {
 
 // パルスモーター管理テーブル
 struct _ppm_ctrl {
-	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:home/step 5:free
+	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:home/step
 	int	ratio;
 	struct _init_pulse {
 		int	init;
@@ -274,6 +274,8 @@ static void L6470_init(unsigned char ch)
 	L6470_param_write(ch, 0x14, 0x7f);
 	// STEP MODE
 	L6470_param_write(ch, 0x16, ppm_ctrl[ch].r9);
+	// SW割込み解除
+	L6470_param_write(ch, 0x18, L6470_param_read(ch, 0x18)|0x10);
 }
 
 // L6470 スピード変更
@@ -307,9 +309,11 @@ static void L6470_change_spd(unsigned char ch, int start_pulse, int max_pulse, i
 static int ppm_init(int ch)
 {
 	struct _ppm_ctrl *pctrl = &ppm_ctrl[ch];
-	int home_in_flag = ((L6470_param_read(ch, 0x19)&0x04) == 0x00)?1:0;
+	int home_in_flag;
 
 	if (L6470_busy(ch)) return 1;
+
+	home_in_flag = ((L6470_param_read(ch, 0x19)&0x04) == 0x00)?1:0;
 
 	switch (pctrl->driving) {
 	case 0:		// 0:not use
@@ -367,10 +371,13 @@ static int ppm_init(int ch)
 			L6470_write(ch, 0xD8);// ResetPos
 		}
 		break;
+	case 4:		// 4:init home add busy
+		pctrl->driving=5;
+		break;
 	default:
 		break;
 	}
-	return (pctrl->driving==4) ? 0:1;
+	return (pctrl->driving==5) ? 0:1;
 }
 
 // シーケンス
@@ -411,10 +418,14 @@ static int sequence(int sock, int no)
 		case -1:
 			pseq->run = 0;
 			message(sock, no, 1, 1, "ERR HOME Out Error");
+			L6470_softstop(pact->mno-1);
+			L6470_softhiz(pact->mno-1);
 			break;
 		case -2:
 			pseq->run = 0;
 			message(sock, no, 1, 1, "ERR HOME In Error");
+			L6470_softstop(pact->mno-1);
+			L6470_softhiz(pact->mno-1);
 			break;
 		default:
 			break;
