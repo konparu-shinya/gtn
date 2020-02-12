@@ -27,6 +27,13 @@
 #define	GPIO27	27
 #define	GPIO22	22
 const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
+#define	GPIO2	2
+#define	GPIO3	3
+#define	GPIO4	4
+#define	GPIO18	18
+#define	GPIO23	23
+#define	GPIO24	24
+const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO18, GPIO23, GPIO24, 0};
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
@@ -493,31 +500,28 @@ static int sequence(int sock, int no)
 		break;
 #endif
 	case 0x41:		// DIO指定ビットON
+		digitalWrite(GPIO_CH[pact->mno-1], 1);
+		pseq->current++;
+		break;
 	case 0x42:		// DIO指定ビットOFF
+		digitalWrite(GPIO_CH[pact->mno-1], 0);
+		pseq->current++;
+		break;
 	case 0x43:		// DIO指定ビットをONまでまつ
-	case 0x44:		// DIO指定ビットをOFFまでまつ
-	case 0x45:		// DIO 32bitデータ書き込み
-	case 0x46:		// DIO 32bitデータ読み込んで表示
-		{
-#if 0
-			/* Action */
-			if (can_action_send(can, pseq->current, dno, pact)) {
-				sprintf(str, "ERR 行番号 = %d CAN Error", pact->line);
-				message(sock, no, 1, 1, str);
-				pseq->run = 0;
-			}
-			/* DIO 32bitデータ読み込んで表示 */
-			else if (pact->act==0x46) {
-				pseq->slv_busy[pact->slvno]=12;
-			}
-			/* DIO 32bitデータ読み込んで表示 以外 */
-			else{
-				pseq->slv_busy[pact->slvno]=11;
-			}
-#endif
-			/* 	I/Oは動作完了するまで進めないのでコメントにする */
-			//pseq->current++;
+		if (digitalRead(GPIO_CH[pact->mno-1]) == 1) {
+			pseq->current++;
 		}
+		break;
+	case 0x44:		// DIO指定ビットをOFFまでまつ
+		if (digitalRead(GPIO_CH[pact->mno-1]) == 0) {
+			pseq->current++;
+		}
+		break;
+	case 0x46:		// DIO ポートREAD=RegA
+		pseq->reg_flag = digitalRead(GPIO_CH[pact->mno-1] == 1);
+		pseq->current++;
+		sprintf(str, "RegA=%XH", pseq->reg_flag);
+		message(sock, no, 1, 2, str);
 		break;
 	case 0x51:		// 指定時間まち(×10msec)
 		if (pseq->busy==0) {
@@ -732,7 +736,9 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	// 動作準備
 	else if (id==0xC014) {
 		int no = (int)((unsigned char)buf[6]);
+		int gpio = (int)((unsigned char)buf[7]);
 		struct _seq_tbl *pseq = &seq_tbl[no-1];
+		int count;
 		if (pseq->run==0) {
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
 			memset(pseq, 0, sizeof(seq_tbl));
@@ -743,6 +749,17 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
 			message(sock, no, 1, 3, "");
+			/* GPIO IN/OUT設定 */
+			for (count=0; GPIO_CH[count]; count++);
+			for (i=0; GPIO_CH[i]; i++) {
+				if ((gpio>>(count-i-1))&0x01) {
+					pinMode(GPIO_CH[i], OUTPUT);
+					digitalWrite(GPIO_CH[i], 0);
+				}
+				else{
+					pinMode(GPIO_CH[i], INPUT);
+				}
+			}
 		}
 	}
 	// 動作開始

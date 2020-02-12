@@ -10,7 +10,7 @@ Gtk.init
 VER = '12.0-gtk2'
 
 # 環境
-#   ラズパイ3b+ CANコントローラ MCP2515 + ラズビアン + gtk2
+#   ラズパイ3b+ ラズビアン + gtk2
 # 拡張子履歴
 # .pr4->.pr5 2005.07.16 ptableの先頭にuse追加
 #            2007.06.15 actionの末尾にR6/R7/R8追加(S字対応)
@@ -81,11 +81,13 @@ $act_hash_dcm = {
 }
 
 $act_hash_dio = {
-  0x41 => 'Bit ON (0〜31:bit no)',
-  0x42 => 'Bit OFF(0〜31:bit no)',
+# 0x41 => 'Bit ON (0〜31:bit no)',
+  0x41 => 'Bit ON ',
+# 0x42 => 'Bit OFF(0〜31:bit no)',
+  0x42 => 'Bit OFF',
   0x43 => 'BitOnをまつ',
   0x44 => 'BitOffをまつ',
-  0x45 => '32bitポート書込み',
+# 0x45 => '32bitポート書込み',
   0x46 => 'ポートREAD=RegA'
 }
 
@@ -310,6 +312,17 @@ def action_info_send(console_no, ary)
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
 
+# GPIO情報の取得
+def gpio_info
+  ret = 0
+  open( $main_form.file_gpio, "r" ) do |f|
+    while line = f.gets
+      ret = (ret << 1 ) + ((line == "IN\n") ? 0:1)
+    end
+  end
+  return ret
+end
+
 # プロジェクト選択
 class SelProject
   def initialize
@@ -376,6 +389,7 @@ class SelProject
       $main_form.file_tnet   = "#{Prjs[$main_form.prj_no]}/tnet#{Kakuchou_si}"
       $main_form.file_ppm    = "#{Prjs[$main_form.prj_no]}/ptable#{Kakuchou_si}"
       $main_form.file_dcm    = "#{Prjs[$main_form.prj_no]}/dctable#{Kakuchou_si}"
+      $main_form.file_gpio   = "#{Prjs[$main_form.prj_no]}/gpio#{Kakuchou_si}"
       $main_form.file_config = "#{Prjs[$main_form.prj_no]}/config#{Kakuchou_si}"
       $main_form.file_action = "#{Prjs[$main_form.prj_no]}/action"
 
@@ -1116,6 +1130,75 @@ class Moter
   end
 end
 
+# GPIO情報
+class Gpio
+  def initialize
+    dialog = Gtk::Dialog.new
+    dialog.set_title( 'GPIO情報' )
+    dialog.signal_connect( 'delete_event' ){ exit_seq; dialog.destroy }
+    dialog.window_position = Gtk::Window::POS_CENTER
+    dialog.modify_bg(Gtk::STATE_NORMAL, Gdk::Color.parse("#fffcc4"))
+
+    @box = []
+    (1..6).each do |i|
+      ary = Array.new(3)
+      ary[1] = Gtk::RadioButton.new('OUT')
+      ary[2] = Gtk::RadioButton.new(ary[1], 'IN')
+      ary[0] = Gtk::HBox.new(false, 2);
+      ary[0].pack_start( ary[1] )
+      ary[0].pack_start( ary[2] )
+      @box.push ary
+    end
+
+    open( $main_form.file_gpio, "r" ) do |f|
+      @box.each do |ary|
+        ary[2].active = true if f.gets == "IN\n"
+      end
+    end
+
+    table = Gtk::Table.new( 2, 3, false )
+    table.attach( Gtk::Label.new( '1' ),         1,  2,  0, 1 )
+    table.attach( Gtk::Label.new( '2' ),         1,  2,  1, 2 )
+    table.attach( Gtk::Label.new( '3' ),         1,  2,  2, 3 )
+    table.attach( Gtk::Label.new( '4' ),         1,  2,  3, 4 )
+    table.attach( Gtk::Label.new( '5' ),         1,  2,  4, 5 )
+    table.attach( Gtk::Label.new( '6' ),         1,  2,  5, 6 )
+    table.attach( Gtk::Label.new( 'GPIO2  ' ),   3,  4,  0, 1 )
+    table.attach( Gtk::Label.new( 'GPIO3  ' ),   3,  4,  1, 2 )
+    table.attach( Gtk::Label.new( 'GPIO4  ' ),   3,  4,  2, 3 )
+    table.attach( Gtk::Label.new( 'GPIO18 ' ),   3,  4,  3, 4 )
+    table.attach( Gtk::Label.new( 'GPIO23 ' ),   3,  4,  4, 5 )
+    table.attach( Gtk::Label.new( 'GPIO24 ' ),   3,  4,  5, 6 )
+    table.attach( @box[0][0],                    5,  6,  0, 1 )
+    table.attach( @box[1][0],                    5,  6,  1, 2 )
+    table.attach( @box[2][0],                    5,  6,  2, 3 )
+    table.attach( @box[3][0],                    5,  6,  3, 4 )
+    table.attach( @box[4][0],                    5,  6,  4, 5 )
+    table.attach( @box[5][0],                    5,  6,  5, 6 )
+    table.attach( Gtk::Label.new( '     ' ),     0,  1,  6, 7 )
+    table.attach( Gtk::Label.new( '     ' ),     2,  3,  6, 7 )
+    table.attach( Gtk::Label.new( '     ' ),     4,  5,  6, 7 )
+    table.attach( Gtk::Label.new( '     ' ),     6,  7,  6, 7 )
+
+    table.show_all
+    dialog.vbox.add( table )
+    dialog.run
+  end
+
+  # 終了処理
+  def exit_seq
+    open( $main_form.file_gpio, "w" ) do |f|
+      @box.each do |ary|
+        if ary[1].active? == true
+          f << "OUT\n"
+        else
+          f << "IN\n"
+        end
+      end
+    end
+  end
+end
+
 # PPM微調整
 class PPMAdjustPulse
   attr_reader :pulse
@@ -1214,7 +1297,7 @@ class PPMAdjustPulse
 
     if $sock_port.open_err == nil
       # ActionプロセスへREADY要求
-      $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC014, @my_console_no, 0x00, ETX], 'C4nC3' )
+      $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC014, @my_console_no, gpio_info(), 0x00, ETX], 'C4nC4' )
 
       # Actionプロセスへ動作情報送信
       if arg == '+'
@@ -2306,7 +2389,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
 
     if $sock_port.open_err == nil
       # ActionプロセスへREADY要求
-      $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC014, @my_console_no, 0x00, ETX], 'C4nC3' )
+      $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC014, @my_console_no, gpio_info(), 0x00, ETX], 'C4nC4' )
 
       # Actionファイルを読み込む
       fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
@@ -2394,7 +2477,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_action
+  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
 
   def initialize( size )
 #    @prj_no = 1
@@ -2427,16 +2510,18 @@ class Gtn
 #   btnTnet   = Gtk::Button.new( 'TNet接続' )
     btnDInfo  = Gtk::Button.new( 'DCMモータ情報' )
     btnMInfo  = Gtk::Button.new( 'PPMモータ情報' )
+    btnGInfo  = Gtk::Button.new( 'GPIO情報' )
     btnMkPrj  = Gtk::Button.new( 'プロジェクト作成' )
     btnCopy   = Gtk::Button.new( 'コピー' )
     btnDelete = Gtk::Button.new( '削除' )
 #   btnSio    = Gtk::Button.new( 'SIO設定' )
 #   btnADDel  = Gtk::Button.new( 'A/Dファイル削除' )
     group1 = Gtk::Table.new( 1, 60, false )
-    group1.attach( @enPrj,                   0, 46, 0, 1 )
-    group1.attach( btnSelPrj,               46, 48, 0, 1 )
-    group1.attach( btnDInfo,                48, 50, 0, 1 )
-    group1.attach( btnMInfo,                50, 52, 0, 1 )
+    group1.attach( @enPrj,                   0, 44, 0, 1 )
+    group1.attach( btnSelPrj,               44, 46, 0, 1 )
+    group1.attach( btnDInfo,                46, 48, 0, 1 )
+    group1.attach( btnMInfo,                48, 50, 0, 1 )
+    group1.attach( btnGInfo,                50, 52, 0, 1 )
     group1.attach( Gtk::Label.new(' '),     52, 53, 0, 1 )
     group1.attach( btnMkPrj,                53, 55, 0, 1 )
     group1.attach( btnCopy,                 55, 57, 0, 1 )
@@ -2517,6 +2602,7 @@ class Gtn
     btnMkPrj.signal_connect( 'clicked' ){ MkProject.new }
     btnDInfo.signal_connect( 'clicked' ){ dcm_clicked }
     btnMInfo.signal_connect( 'clicked' ){ moter_clicked }
+    btnGInfo.signal_connect( 'clicked' ){ gpio_clicked }
     btnCopy.signal_connect( 'clicked' ){ copy_clicked }
     btnDelete.signal_connect( 'clicked' ){ delete_clicked }
 #   btnSio.signal_connect( 'clicked' ){ SioEdit.new }
@@ -2590,6 +2676,17 @@ class Gtn
     Moter.new
   end
 
+  # GPIO情報ボタンクリック
+  def gpio_clicked
+    # プロジェクトが選ばれている事
+    return if $main_form.file_ppm == nil
+
+    # 全Actionが停止であることを確認する
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
+
+    Gpio.new
+  end
+
   # コピーボタンクリック
   def copy_clicked
     # プロジェクトが選ばれている事
@@ -2635,7 +2732,7 @@ class Gtn
       next if !@run[ i-1 ].active?
       if $sock_port.open_err == nil
         # ActionプロセスへREADY要求
-        $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC014, i, 0x00, ETX], 'C4nC3' )
+        $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC014, i, gpio_info(), 0x00, ETX], 'C4nC4' )
         ready.push i
 
         # Actionファイルを読み込む
