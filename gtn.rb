@@ -99,7 +99,8 @@ $act_hash_evt = {
 }
 
 $act_hash_adc = {
-  0x71 => 'A/D取込み'
+  0x71 => 'カウント取込み',
+  0x72 => 'カウント取込終了待ち'
 }
 
 def b2d( str )
@@ -307,7 +308,7 @@ def action_info_send(console_no, ary)
   when "EVENT"
     cmd[8] = $act_hash_evt.key(ary[5]) if $act_hash_evt.key(ary[5])
   when "MEAS"
-    cmd[8] = 0x71
+    cmd[8] = $act_hash_adc.key(ary[5]) if $act_hash_adc.key(ary[5])
   end
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
@@ -1166,9 +1167,9 @@ class Gpio
     table.attach( Gtk::Label.new( 'GPIO2  ' ),   3,  4,  0, 1 )
     table.attach( Gtk::Label.new( 'GPIO3  ' ),   3,  4,  1, 2 )
     table.attach( Gtk::Label.new( 'GPIO4  ' ),   3,  4,  2, 3 )
-    table.attach( Gtk::Label.new( 'GPIO18 ' ),   3,  4,  3, 4 )
-    table.attach( Gtk::Label.new( 'GPIO23 ' ),   3,  4,  4, 5 )
-    table.attach( Gtk::Label.new( 'GPIO24 ' ),   3,  4,  5, 6 )
+    table.attach( Gtk::Label.new( 'GPIO5  ' ),   3,  4,  3, 4 )
+    table.attach( Gtk::Label.new( 'GPIO6  ' ),   3,  4,  4, 5 )
+    table.attach( Gtk::Label.new( 'GPIO13 ' ),   3,  4,  5, 6 )
     table.attach( @box[0][0],                    5,  6,  0, 1 )
     table.attach( @box[1][0],                    5,  6,  1, 2 )
     table.attach( @box[2][0],                    5,  6,  2, 3 )
@@ -1694,7 +1695,7 @@ class Input
     table4_7.attach( Gtk::Label.new( CommentTitle ),   0, 4, 0, 1 )
     table4_7.attach( @edtMComment,                     0, 4, 1, 2 )
     table4_7.attach( Gtk::Label.new( "Action" ),       0, 3, 2, 3 )
-    table4_7.attach( Gtk::Label.new( "msec." ),        3, 4, 2, 3 )
+    table4_7.attach( Gtk::Label.new( "秒" ),           3, 4, 2, 3 )
     table4_7.attach( @cmbMAction,                      0, 3, 3, 4 )
     table4_7.attach( @spnBtnMTimes,                    3, 4, 3, 4 )
     table4_7.attach( btnMWrite,                        0, 4, 4, 5 )

@@ -2,10 +2,12 @@
  * gtn for ラズパイ のAction実行部
  *  パルスモーターコントローラー:L6470
  *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15)
- *                               DIO
- *                                GPIO2(pin3) GPIO3(pin5) GPIO4(pin7) GPIO18(pin12) GPIO23(pin16) GPIO24(pin18)
  *      R 9の設定:StepMode
  *      R10の設定:b15-b8:KVAL_HOLD b7-b0:KVAL_RUN/KVAL_ACC/KVAL_DEC
+ *  DIO
+ *                                GPIO2(pin3) GPIO3(pin5) GPIO4(pin7) GPIO5(pin29) GPIO6(pin31) GPIO13(pin33)
+ *  A/D
+ *                                USB-RS232C
  *  gcc -o gtnaction gtnaction.c -lwiringPi
  ********************************************************************************/
 #include <stdio.h>
@@ -30,10 +32,11 @@ const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
 #define	GPIO2	2
 #define	GPIO3	3
 #define	GPIO4	4
+#define	GPIO5	5
+#define	GPIO6	6
+#define	GPIO13	13
+const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 #define	GPIO18	18
-#define	GPIO23	23
-#define	GPIO24	24
-const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO18, GPIO23, GPIO24, 0};
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
@@ -62,6 +65,10 @@ struct _seq_tbl {
 	int reg_flag;				// レジスタ読み込み値の保存
 	int	busy;					// 1:Wait中
 	struct timespec wai_start;	// Wait開始
+	int	cntbusy;				// 1:カウント取込み中
+	struct timespec cnt_start;	// カウント取込み開始
+	int	cntsec;					// カウント取り込み秒数表示
+	int	cnttimes;				// カウント取り込み秒数
 } static seq_tbl[CONSOLE_MAX]={
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
@@ -630,12 +637,41 @@ static int sequence(int sock, int no)
 		    pseq->current++;
         }
 		break;
-	case 0x71:		// A/D取り込み
+	case 0x71:		// カウント取り込み
+		pseq->cntbusy  =1;
+		pseq->cntsec   =0;
+		pseq->cnttimes =pact->move_pulse;
+		clock_gettime(CLOCK_MONOTONIC, &pseq->cnt_start);
 		pseq->current++;
+		break;
+	case 0x72:		// カウント取り込み終了まち
+		if (pseq->cntbusy==0) {
+			pseq->current++;
+		}
 		break;
 	default:
 		pseq->current++;
 		break;
+	}
+
+	// カウント取込み処理
+	if (pseq->cntbusy==1) {
+		long sec;
+		struct timespec tim_end;
+		clock_gettime(CLOCK_MONOTONIC, &tim_end);
+		if((tim_end.tv_nsec - pseq->cnt_start.tv_nsec) < 0){
+			tim_end.tv_nsec += 1000000000;
+			tim_end.tv_sec  -= 1;
+		}
+		sec  = tim_end.tv_sec - pseq->cnt_start.tv_sec;
+		if (pseq->cntsec < sec) {
+			pseq->cntsec = sec;
+			sprintf(str, "カウント取込み:%lu秒", sec);
+			message(sock, no, 1, 3, str);
+		}
+		if (pseq->cnttimes <= sec) {
+			pseq->cntbusy=0;
+		}
 	}
 
 	// 終了判定
