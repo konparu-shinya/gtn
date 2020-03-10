@@ -19,8 +19,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <termios.h>
 #include <net/if.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <wiringPi.h>
 #include <wiringPiSPI.h>
 
@@ -386,9 +390,10 @@ static int ppm_init(int ch)
 }
 
 // シーケンス
-static int sequence(int sock, int no)
+static int sequence(int sock, int fd, int no)
 {
-    int i;
+static int next_flag=0;
+	int i, rts=TIOCM_RTS;
 	char str[32];
 	struct _seq_tbl *pseq = &seq_tbl[no-1];
 	struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
@@ -638,10 +643,19 @@ static int sequence(int sock, int no)
         }
 		break;
 	case 0x71:		// カウント取り込み
-		pseq->cntbusy  =1;
-		pseq->cntsec   =0;
-		pseq->cnttimes =pact->move_pulse;
-		clock_gettime(CLOCK_MONOTONIC, &pseq->cnt_start);
+		if (fd>-1) {
+			pseq->cntbusy  =1;
+			pseq->cntsec   =0;
+			pseq->cnttimes =pact->move_pulse;
+			clock_gettime(CLOCK_MONOTONIC, &pseq->cnt_start);
+			ioctl(fd, TIOCMBIC, &rts);
+			tcflush(fd, TCIFLUSH);
+			ioctl(fd, TIOCMBIS, &rts);
+			next_flag=0;
+		}
+		else{
+			message(sock, no, 1, 1, "ERR カウントDevice OPEN");
+		}
 		pseq->current++;
 		break;
 	case 0x72:		// カウント取り込み終了まち
@@ -656,14 +670,34 @@ static int sequence(int sock, int no)
 
 	// カウント取込み処理
 	if (pseq->cntbusy==1) {
+		time_t nsec;
 		long sec;
-		struct timespec tim_end;
-		clock_gettime(CLOCK_MONOTONIC, &tim_end);
-		if((tim_end.tv_nsec - pseq->cnt_start.tv_nsec) < 0){
-			tim_end.tv_nsec += 1000000000;
-			tim_end.tv_sec  -= 1;
+		struct timespec tim_now;
+		int n;
+		// 経過時間を得る
+		clock_gettime(CLOCK_MONOTONIC, &tim_now);
+		if((tim_now.tv_nsec - pseq->cnt_start.tv_nsec) < 0){
+			tim_now.tv_nsec += 1000000000;
+			tim_now.tv_sec  -= 1;
 		}
-		sec  = tim_end.tv_sec - pseq->cnt_start.tv_sec;
+		nsec = tim_now.tv_nsec - pseq->cnt_start.tv_nsec;
+		sec  = tim_now.tv_sec - pseq->cnt_start.tv_sec;
+
+		ioctl(fd, FIONREAD, &n);
+		if (n>=240) {
+			read( fd, cBuf, 240 );
+			tcflush(fd, TCIFLUSH);
+			ioctl(fd, TIOCMBIC, &rts);
+			next_flag=0;
+		}
+		else if(!next_flag) {
+			if (nsec>990000000) {
+				ioctl(fd, TIOCMBIS, &rts);
+				next_flag=1;
+			}
+		}
+
+		// 取り込み終了判定
 		if (pseq->cntsec < sec) {
 			pseq->cntsec = sec;
 			sprintf(str, "カウント取込み:%lu秒", sec);
@@ -864,7 +898,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 }
 
 // コンソールとのソケット送受信
-static int execute(int sock)
+static int execute(int sock, int fd)
 {
 	char buf[512], str[32];
 	int i, len=1;
@@ -893,15 +927,89 @@ static int execute(int sock)
 		// シーケンス
 		for (i=0; i<CONSOLE_MAX; i++) {
 			if (seq_tbl[i].run) {
-				sequence(sock, i+1);
+				sequence(sock, fd, i+1);
 			}
 		}
 	}
 	return 0;
 }
 
+static speed_t symbolic_speed( int speednum )
+{
+	if( speednum >= 460800 ) return B460800;
+	if( speednum >= 230400 ) return B230400;
+	if( speednum >= 115200 ) return B115200;
+	if( speednum >= 57600 ) return B57600;
+	if( speednum >= 38400 ) return B38400;
+	if( speednum >= 19200 ) return B19200;
+	if( speednum >= 9600 ) return B9600;
+	if( speednum >= 4800 ) return B4800;
+	if( speednum >= 2400 ) return B2400;
+	if( speednum >= 1200 ) return B1200;
+	if( speednum >= 600 ) return B600;
+	if( speednum >= 300 ) return B300;
+	if( speednum >= 200 ) return B200;
+	if( speednum >= 150 ) return B150;
+	if( speednum >= 134 ) return B134;
+	if( speednum >= 110 ) return B110;
+	if( speednum >= 75 ) return B75;
+	return B50;
+}
+
+/**************************************************
+ * 機能: ttySデバイスを開く
+ * 引数: char *devname : デバイスファイル名
+ *       int speed     : ボーレート:50～460800
+ *       int bits      : ビット長:8/7
+ *       int par       : パリティ: 0:無し 1:奇数 2:偶数
+ *       int stop      : ストップ: 1/2
+ * 戻値: -1:open error
+ **************************************************/
+static int open_ttyS( char *devname, int speed, int bits, int par, int stop )
+{
+	int	flag=0;
+	struct	termios	pts;	/* ポートのtermios設定 */
+
+	int	pf = open( devname, O_RDWR );
+	if( pf < 0 ) return -1;
+
+	/* ポート設定の変更 */
+	tcgetattr( pf, &pts );
+	pts.c_lflag &= ~(ICANON | ECHO | ECHOCTL | ECHONL | ISIG | IEXTEN);
+	pts.c_cflag = HUPCL;
+	pts.c_cc[ VMIN ] = 1;
+	pts.c_cc[ VTIME ] = 0;
+
+	/* 改行/復帰のマッピングはしない */
+	/* 改行のマッピングはしない */
+	pts.c_oflag &= ~ONLCR;
+	pts.c_iflag &= ~ICRNL;
+	/* フロー制御無し */
+	pts.c_cflag &= ~CRTSCTS;
+	pts.c_iflag &= ~(IXON|IXOFF|IXANY);
+
+	/* ボーレート */
+	cfsetospeed( &pts, symbolic_speed( speed ) );
+	cfsetispeed( &pts, symbolic_speed( speed ) );
+
+	/* ビット長、パリティ、ストップ */
+	if( bits == 7 ) flag |= CS7;
+	if( stop == 2 ) flag |= CSTOPB;
+	if( par > 0 ){
+		flag |= PARENB;
+		if( par == 1 ) flag |= PARODD;
+	}
+	pts.c_cflag |= flag;
+
+	/* 変更したtermios設定を変更する */
+	tcsetattr( pf, TCSANOW, &pts );
+
+	return pf;
+}
+
 int main(void)
 {
+	int fd = open_ttyS( "/dev/ttyUSB0", 9600, 8, 2, 1);		// フォトンカウント
 	int servSock;							//server socket descripter
 	int clitSock;							//client socket descripter
 	struct sockaddr_in servSockAddr;		//server internet socket address
@@ -964,7 +1072,7 @@ int main(void)
 #else
 		ret = 0;
 #endif
-		execute(clitSock);
+		execute(clitSock, fd);
 
 		close(clitSock);
 		printf("close\n");
