@@ -69,16 +69,22 @@ struct _seq_tbl {
 	int reg_flag;				// レジスタ読み込み値の保存
 	int	busy;					// 1:Wait中
 	struct timespec wai_start;	// Wait開始
-	int	cntbusy;				// 1:カウント取込み中
-	struct timespec cnt_start;	// カウント取込み開始
-	int	cntsec;					// カウント取り込み秒数表示
-	int	cnttimes;				// カウント取り込み秒数
 } static seq_tbl[CONSOLE_MAX]={
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0}
 	};
+
+// カウント管理テーブル
+struct _cnt_tbl {
+	int	busy;					// 1:カウント取込み中
+	struct timespec tim_start;	// カウント取込み開始
+	int	sec;					// カウント取り込み秒数表示
+	int	times;					// カウント取り込み秒数
+	int next_flag;				// 1:継続取り込み中＊1秒毎に240バイトのデータを取り込むデバイスである
+	char buf[1000][240];		// 1000秒のデータバッファ
+} static cnt_tbl={0};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -392,7 +398,6 @@ static int ppm_init(int ch)
 // シーケンス
 static int sequence(int sock, int fd, int no)
 {
-static int next_flag=0;
 	int i, rts=TIOCM_RTS;
 	char str[32];
 	struct _seq_tbl *pseq = &seq_tbl[no-1];
@@ -644,14 +649,14 @@ static int next_flag=0;
 		break;
 	case 0x71:		// カウント取り込み
 		if (fd>-1) {
-			pseq->cntbusy  =1;
-			pseq->cntsec   =0;
-			pseq->cnttimes =pact->move_pulse;
-			clock_gettime(CLOCK_MONOTONIC, &pseq->cnt_start);
+			cnt_tbl.busy     =1;
+			cnt_tbl.sec      =0;
+			cnt_tbl.times    =pact->move_pulse;
+			cnt_tbl.next_flag=0;
+			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
 			ioctl(fd, TIOCMBIC, &rts);
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIS, &rts);
-			next_flag=0;
 		}
 		else{
 			message(sock, no, 1, 1, "ERR カウントDevice OPEN");
@@ -659,7 +664,7 @@ static int next_flag=0;
 		pseq->current++;
 		break;
 	case 0x72:		// カウント取り込み終了まち
-		if (pseq->cntbusy==0) {
+		if (cnt_tbl.busy==0) {
 			pseq->current++;
 		}
 		break;
@@ -669,42 +674,42 @@ static int next_flag=0;
 	}
 
 	// カウント取込み処理
-	if (pseq->cntbusy==1) {
+	if (cnt_tbl.busy==1) {
 		time_t nsec;
 		long sec;
 		struct timespec tim_now;
 		int n;
 		// 経過時間を得る
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if((tim_now.tv_nsec - pseq->cnt_start.tv_nsec) < 0){
+		if((tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec) < 0){
 			tim_now.tv_nsec += 1000000000;
 			tim_now.tv_sec  -= 1;
 		}
-		nsec = tim_now.tv_nsec - pseq->cnt_start.tv_nsec;
-		sec  = tim_now.tv_sec - pseq->cnt_start.tv_sec;
+		nsec = tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec;
+		sec  = tim_now.tv_sec - cnt_tbl.tim_start.tv_sec;
 
 		ioctl(fd, FIONREAD, &n);
 		if (n>=240) {
-			read( fd, cBuf, 240 );
+			read( fd, cnt_tbl.buf[sec], 240 );
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIC, &rts);
-			next_flag=0;
+			cnt_tbl.next_flag=0;
 		}
-		else if(!next_flag) {
+		else if(!cnt_tbl.next_flag) {
 			if (nsec>990000000) {
 				ioctl(fd, TIOCMBIS, &rts);
-				next_flag=1;
+				cnt_tbl.next_flag=1;
 			}
 		}
 
 		// 取り込み終了判定
-		if (pseq->cntsec < sec) {
-			pseq->cntsec = sec;
+		if (cnt_tbl.sec < sec) {
+			cnt_tbl.sec = sec;
 			sprintf(str, "カウント取込み:%lu秒", sec);
 			message(sock, no, 1, 3, str);
 		}
-		if (pseq->cnttimes <= sec) {
-			pseq->cntbusy=0;
+		if (cnt_tbl.times <= sec) {
+			cnt_tbl.busy=0;
 		}
 	}
 
