@@ -79,12 +79,16 @@ struct _seq_tbl {
 // カウント管理テーブル
 struct _cnt_tbl {
 	int	busy;					// 1:カウント取込み中
-	struct timespec tim_start;	// カウント取込み開始
+	int n;						// 取り込んだデータ数
 	int	sec;					// カウント取り込み秒数表示
 	int	times;					// カウント取り込み秒数
 	int next_flag;				// 1:継続取り込み中＊1秒毎に240バイトのデータを取り込むデバイスである
+	int min;					// カウントMin値
+	int max;					// カウントMax値
+	struct timespec tim_start;	// カウント取込み開始
+	char str_start[32];			// カウント取込み開始時刻文字列
 	char buf[1000][240];		// 1000秒のデータバッファ
-} static cnt_tbl={0};
+} static cnt_tbl={0, 0};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -395,6 +399,38 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// カウント値をファイルに保存する
+static int count_save(char *str)
+{
+	int ret=-1;
+	int i, j, k, l;
+	FILE *fp;
+	time_t t = time(NULL);
+	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&t));
+	fp=fopen(str, "w");
+	if (fp) {
+		for (i=0; i<cnt_tbl.n; i++) {
+			unsigned long total=0L;
+			for (j=0, l=0; j<240; ) {
+				//各4バイトの下位5ビットが測光データ20bits
+				unsigned long dat=0L;
+				for (k=0; k<=3; k++) {
+					dat += (cnt_tbl.buf[i][j++]&0x1f) << (5*k);
+				}
+				// min以上max以下の値の平均値を1秒間の測定値とする
+				if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
+					total += dat;
+					l++;
+				}
+			}
+			fprintf(fp, "%s,  %ld\r\n", cnt_tbl.str_start, (l>0L)?total/l:0L);
+		}
+		fclose(fp);
+		ret=0;
+	}
+	return ret;
+}
+
 // シーケンス
 static int sequence(int sock, int fd, int no)
 {
@@ -649,11 +685,16 @@ static int sequence(int sock, int fd, int no)
 		break;
 	case 0x71:		// カウント取り込み
 		if (fd>-1) {
+			time_t t = time(NULL);
 			cnt_tbl.busy     =1;
+			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
 			cnt_tbl.next_flag=0;
+			cnt_tbl.min      =pact->start_pulse;
+			cnt_tbl.max      =pact->max_pulse;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
+			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 			ioctl(fd, TIOCMBIC, &rts);
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIS, &rts);
@@ -691,9 +732,10 @@ static int sequence(int sock, int fd, int no)
 		ioctl(fd, FIONREAD, &n);
 		if (n>=240) {
 			read( fd, cnt_tbl.buf[sec], 240 );
-			tcflush(fd, TCIFLUSH);
+//			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIC, &rts);
 			cnt_tbl.next_flag=0;
+			cnt_tbl.n++;
 		}
 		else if(!cnt_tbl.next_flag) {
 			if (nsec>990000000) {
@@ -740,6 +782,14 @@ static int sequence(int sock, int fd, int no)
 			if (pseq->ret_line) {
 				sprintf(str, "%d", local_ret_line);
 				message(sock, no, 2, 0, str);
+			}
+			// カウント値取得済であればファイルに保存する
+			if (cnt_tbl.n>0) {
+				char tmp[32];
+				if (count_save(tmp)==0) {
+					sprintf(str, "FILE %s", tmp);
+					message(sock, no, 1, 1, str);
+				}
 			}
 		}
 		// Next
@@ -892,6 +942,8 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 				break;
 			}
 		}
+		// カウント強制停止
+		cnt_tbl.busy=0;
 	}
 	// スレッド生成
 	else if (id==0xC012) {

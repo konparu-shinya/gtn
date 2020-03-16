@@ -4,10 +4,15 @@ require 'gtk2'
 #require 'kconv'
 #require 'FileUtils'
 require 'socket'
+require 'gmail'
 
 Gtk.init
 
 VER = '12.0-gtk2'
+
+#MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp"
+MailTo = "konparus@alice.aandt.co.jp"
+
 
 # 環境
 #   ラズパイ3b+ ラズビアン + gtk2
@@ -1688,17 +1693,25 @@ class Input
     @cmbMAction     = Gtk::Combo.new()
     spnAdjustMTimes = Gtk::Adjustment.new( 1, 1, 2000, 1, 2, 0 )
     @spnBtnMTimes   = Gtk::SpinButton.new( spnAdjustMTimes, 0, 0 )
+    spnAdjustMin    = Gtk::Adjustment.new( 0, 0, 1048575, 1, 2, 0 )
+    @spnBtnMin      = Gtk::SpinButton.new( spnAdjustMin, 0, 0 )
+    spnAdjustMax    = Gtk::Adjustment.new( 1048575, 0, 1048575, 1, 2, 0 )
+    @spnBtnMax      = Gtk::SpinButton.new( spnAdjustMax, 0, 0 )
     btnMWrite       = Gtk::Button.new( '書込み' )
 
     # Edit A/D 配置
     table4_7 = Gtk::Table.new( 3, 4, false )
-    table4_7.attach( Gtk::Label.new( CommentTitle ),   0, 4, 0, 1 )
-    table4_7.attach( @edtMComment,                     0, 4, 1, 2 )
-    table4_7.attach( Gtk::Label.new( "Action" ),       0, 3, 2, 3 )
-    table4_7.attach( Gtk::Label.new( "秒" ),           3, 4, 2, 3 )
-    table4_7.attach( @cmbMAction,                      0, 3, 3, 4 )
-    table4_7.attach( @spnBtnMTimes,                    3, 4, 3, 4 )
-    table4_7.attach( btnMWrite,                        0, 4, 4, 5 )
+    table4_7.attach( Gtk::Label.new( CommentTitle ),   0, 5, 0, 1 )
+    table4_7.attach( @edtMComment,                     0, 5, 1, 2 )
+    table4_7.attach( Gtk::Label.new( "Action" ),       0, 2, 2, 3 )
+    table4_7.attach( Gtk::Label.new( "秒" ),           2, 3, 2, 3 )
+    table4_7.attach( Gtk::Label.new( "Min" ),          3, 4, 2, 3 )
+    table4_7.attach( Gtk::Label.new( "Max" ),          4, 5, 2, 3 )
+    table4_7.attach( @cmbMAction,                      0, 2, 3, 4 )
+    table4_7.attach( @spnBtnMTimes,                    2, 3, 3, 4 )
+    table4_7.attach( @spnBtnMin,                       3, 4, 3, 4 )
+    table4_7.attach( @spnBtnMax,                       4, 5, 3, 4 )
+    table4_7.attach( btnMWrite,                        0, 5, 4, 5 )
 
     # Notebook
     @nbook = Gtk::Notebook.new()
@@ -1923,6 +1936,8 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     when "MEAS"
       @cmbMAction.entry.set_text( iter.get_value(4) )
       @spnBtnMTimes.set_value( iter.get_value(5).to_i )
+      @spnBtnMin.set_value( iter.get_value(6).to_i )
+      @spnBtnMax.set_value( iter.get_value(7).to_i )
       @nbook.set_page( 6 )
     end
 
@@ -2206,7 +2221,9 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
             '',
             "#{@cmbMAction.entry.text}", 
             "#{@spnBtnMTimes.value_as_int}",
-            "-", "-", "-", "-", "-", "-", "-", "-" ]
+            "#{@spnBtnMin.value_as_int}",
+            "#{@spnBtnMax.value_as_int}",
+            "-", "-", "-", "-", "-", "-" ]
     clist_write( fmt )
     # ステータスクリア
     clear_status
@@ -2906,6 +2923,22 @@ Gtk.timeout_add( 200 ) do
             end
           end
         end
+      # A/D取り込みファイル
+      elsif line == 1 && msg =~ /FILE/
+        file = msg.split(/\s/)[-1]
+        name = msg.split(/\//)[-1]
+        # gmail送信
+        gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
+        gmail.deliver do
+          to MailTo
+          subject "測定レポート:#{name}"
+          #text_part do
+          #  body "本文"
+          #end
+          add_file file
+        end
+        gmail.logout
+        File.unlink file
       # その他は黒文字
       else
         style = Gtk::Style.new
