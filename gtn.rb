@@ -11,7 +11,8 @@ Gtk.init
 VER = '12.0-gtk2'
 
 #MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp"
-MailTo = "konparus@alice.aandt.co.jp"
+#MailTo = "konparus@alice.aandt.co.jp"
+MailTo = nil
 
 
 # 環境
@@ -327,6 +328,30 @@ def gpio_info
     end
   end
   return ret
+end
+
+# 起動メッセージ
+class StartMessage
+  def initialize
+    @dialog = Gtk::Dialog.new
+    @dialog.set_title( '確認' )
+    @dialog.signal_connect( 'delete_event' ){ @dialog.destroy }
+    @dialog.window_position = Gtk::Window::POS_CENTER
+    @dialog.set_default_size 400, 80
+    @dialog.modify_bg(Gtk::STATE_NORMAL, Gdk::Color.parse("#fffcc4"))
+	@dialog.add_button(Gtk::Stock::CLOSE, Gtk::Dialog::RESPONSE_CLOSE)
+	
+	label = Gtk::Label.new("A&T OPEN インターネットに接続してください");
+    label.show_all
+    @dialog.vbox.add( label )
+    # ダイアログを表示して戻りを処理する
+    @dialog.run do |response|
+      case response
+      when Gtk::Dialog::RESPONSE_CLOSE
+        @dialog.destroy
+      end
+    end
+  end
 end
 
 # プロジェクト選択
@@ -2872,6 +2897,8 @@ end
 # 通信オブジェクト生成
 $sock_port = MySocket.new
 
+StartMessage.new
+
 # MAIN画面表示
 $main_form = Gtn.new( 20 )
 
@@ -2924,7 +2951,7 @@ Gtk.timeout_add( 200 ) do
           end
         end
       # A/D取り込みファイル
-      elsif line == 1 && msg =~ /FILE/
+      elsif line == 1 && msg =~ /FILE/ && MailTo
         file = msg.split(/\s/)[-1]
         name = msg.split(/\//)[-1]
         # gmail送信
