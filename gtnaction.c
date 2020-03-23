@@ -25,14 +25,19 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <wiringPi.h>
-#include <wiringPiSPI.h>
+#include "wiringPi.h"
 
-#define L6470_SPI_CHANNEL 0
+// ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
+#define L6470_SPI_L6470 1
+#define	GPIO19	19		// SPI1 MISO
+#define	GPIO20	20		// SPI1 MOSI
+#define	GPIO21	21		// SPI1 SCLK
+// L6470のSPI CS
 #define	GPIO17	17
 #define	GPIO27	27
 #define	GPIO22	22
 const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
+// IN/OUT
 #define	GPIO2	2
 #define	GPIO3	3
 #define	GPIO4	4
@@ -218,12 +223,30 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 	return 0;
 }
 
+static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
+{
+	int i;
+	unsigned char c, org=*data;
+	*data=0;
+	for (i=0; i<8; i++) {
+		// SPI1 MOSI
+		digitalWrite(GPIO20, (org>>(7-i))&0x01);
+		// SPI1 SCLK
+		digitalWrite(GPIO21, 0);
+		// SPI1 SCLK
+		digitalWrite(GPIO21, 1);
+		// SPI1 MISO
+		c = digitalRead(GPIO19)&0x01;
+		(*data) += (c<<(7-i));
+	}
+}
+
 // L6470に1byte送信
 static unsigned char L6470_write(unsigned char ch, unsigned char data)
 {
 	unsigned char org=data;
 	digitalWrite(L6470_CH[ch], 0);
-	wiringPiSPIDataRW(L6470_SPI_CHANNEL, &data, 1);
+	wiringPiSPIDataRW2(L6470_SPI_L6470, ch, &data, 1);
 	digitalWrite(L6470_CH[ch], 1);
 	delay(1);
 	return data;
@@ -1075,20 +1098,23 @@ int main(void)
 	unsigned short servPort = 9001;			//server port number
 	int on = 1, ret, i;
 
-	/* SPI channel 0 を 1MHz で開始 */
-	if (wiringPiSPISetupMode(L6470_SPI_CHANNEL, 1000000, 3) < 0) {
-		perror("SPI Setup failed:\n");
-		exit(EXIT_FAILURE);
-	}
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");
 		exit(EXIT_FAILURE);
 	}
+	// SPI CS
 	for (i=0; L6470_CH[i]; i++) {
 		pinMode(L6470_CH[i], OUTPUT);
 		digitalWrite(L6470_CH[i], 1);
 	}
+	// SPI1 SCLK
+	pinMode(GPIO21, OUTPUT);
+	digitalWrite(GPIO21, 1);
+	// SPI1 MOSI
+	pinMode(GPIO20, OUTPUT);
+	// SPI1 MISO
+	pinMode(GPIO19, INPUT);
 
 	if ((servSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 ){
 		perror("socket() failed.");
