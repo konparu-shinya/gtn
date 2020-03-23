@@ -1,0 +1,40 @@
+ラズパイのセットアップ
+
+1.ラズビアンを32GBのSDカードへインストール
+  2018-11-13-rasbian-stretch.img
+
+2./boot/config.txt
+dtparam=spi=on
+
+3.Wifi 
+A&T OPENに接続 password=67226722
+
+ブラウザから以下のURLを開いて「インターネットへ接続する」をクリック
+https://n249.network-auth.com/splash/?mac=0C:8D:DB:94:38:D9&real_ip=10.169.152.50&client_ip=10.169.152.50&client_mac=B8:27:EB:48:12:DA&vap=2&a=472b07b9fcf2c2451e8781e944bf5f77cd8457c8&b=18744256&auth_version=5&key=9b327cba2546a9c7977a0f99141aff3022a6bbb0&acl_ver=P6066040V2&continue_url=http://raspbian.raspberrypi.org/raspbian
+
+4.ターミナルから実行
+$ sudo apt-get updateを実行
+$ sudo apt-get install fcitx-mozc
+再起動
+①メニューから「設定」→「Fcitx設定」を選択します。
+②「入力メソッドの設定」から「全体の設定」タブを選択します。
+③「ホットキー」の「入力メソッドのオンオフ」をクリックすると、キー入力待ちとなるので、日本語切替キーとしたいキーを押します。今回は「全角/半角 漢字」キーを押下しています。
+
+$ sudo apt-get install vim-gtk
+$ sudo apt-get install ruby-gtk2
+$ sudo gem install ruby-gmail    ※必要かな...
+
+5.プリエンプションカーネルRTLinux
+/lib/modules/4.14.91-rt49-v7+ 
+/boot/  にカーネルを
+
+6.ソースコード
+$ mkdir gtn
+$ cd gtn
+$ git clone https://github.com/konparu-shinya/gtn.git 
+$ gcc -o gtnaction gtnaction.c -lwiringPi
+
+7.起動
+./gtnaction
+ruby gtn.rb
+
