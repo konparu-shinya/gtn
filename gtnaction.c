@@ -233,11 +233,13 @@ static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
 		digitalWrite(GPIO20, (org>>(7-i))&0x01);
 		// SPI1 SCLK
 		digitalWrite(GPIO21, 0);
+		delay(1);
 		// SPI1 SCLK
 		digitalWrite(GPIO21, 1);
 		// SPI1 MISO
 		c = digitalRead(GPIO19)&0x01;
 		(*data) += (c<<(7-i));
+		delay(1);
 	}
 }
 
@@ -295,8 +297,8 @@ static void L6470_init(unsigned char ch)
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
-	L6470_write(ch, 0xc0);
-	L6470_write(ch, 0xB0);	// SoftStop
+	L6470_write(ch, 0xc0);	// Reset
+	L6470_write(ch, 0xA8);	// HardHiZ
 
 	// MIN_SPEED設定。
 	L6470_param_write(ch, 0x08, 0x15);
@@ -318,6 +320,8 @@ static void L6470_init(unsigned char ch)
 	L6470_param_write(ch, 0x16, ppm_ctrl[ch].r9);
 	// SW割込み解除
 	L6470_param_write(ch, 0x18, L6470_param_read(ch, 0x18)|0x10);
+	// SoftStop
+	L6470_write(ch, 0xB0);
 }
 
 // L6470 スピード変更
