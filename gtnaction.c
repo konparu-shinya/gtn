@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 #include <time.h>
 #include <termios.h>
 #include <net/if.h>
@@ -303,15 +304,15 @@ static void L6470_init(unsigned char ch)
 	// MIN_SPEED設定。
 	L6470_param_write(ch, 0x08, 0x15);
 	// MAX_SPEED設定。
-	L6470_param_write(ch, 0x07, 2000);
+	L6470_param_write(ch, 0x07, 20);
 	// KVAL_HOLD設定。
-	L6470_param_write(ch, 0x09, (ppm_ctrl[ch].r10>>8) & 0x0f);
+	L6470_param_write(ch, 0x09, (ppm_ctrl[ch].r10>>8) & 0xff);
 	// KVAL_RUN設定。
-	L6470_param_write(ch, 0x0A, ppm_ctrl[ch].r10 & 0x0f);
+	L6470_param_write(ch, 0x0A, ppm_ctrl[ch].r10 & 0xff);
 	// KVAL_ACC設定。
-	L6470_param_write(ch, 0x0B, ppm_ctrl[ch].r10 & 0x0f);
+	L6470_param_write(ch, 0x0B, ppm_ctrl[ch].r10 & 0xff);
 	// KVAL_DEC設定。
-	L6470_param_write(ch, 0x0C, ppm_ctrl[ch].r10 & 0x0f);
+	L6470_param_write(ch, 0x0C, ppm_ctrl[ch].r10 & 0xff);
 	// OCD_TH設定。
 	L6470_param_write(ch, 0x13, 0x0f);
 	// STALL_TH設定。
@@ -331,22 +332,22 @@ static void L6470_change_spd(unsigned char ch, int start_pulse, int max_pulse, i
 	if (pctrl->speed.start!=start_pulse) {
 		pctrl->speed.start=start_pulse;
 		// MIN_SPEED設定。
-		L6470_param_write(ch, 0x08, start_pulse);
+		L6470_param_write(ch, 0x08, (long)((double)start_pulse*(250*pow(10,-9))/(pow(2,-24))));
 	}
 	if (pctrl->speed.max!=max_pulse) {
 		pctrl->speed.max=max_pulse;
 		// MAX_SPEED設定。
-		L6470_param_write(ch, 0x07, max_pulse);
+		L6470_param_write(ch, 0x07, (long)((double)max_pulse*(250*pow(10,-9))/(pow(2,-18))));
 	}
 	if (pctrl->speed.acc!=st_slope) {
 		pctrl->speed.acc=st_slope;
 		// ACC設定。
-		L6470_param_write(ch, 0x05, st_slope);
+		L6470_param_write(ch, 0x05, (long)((double)st_slope*(pow(250*pow(10,-9),2))/(pow(2,-40))));
 	}
 	if (pctrl->speed.dec!=ed_slope) {
 		pctrl->speed.dec=ed_slope;
 		// DEC設定。
-		L6470_param_write(ch, 0x06, ed_slope);
+		L6470_param_write(ch, 0x06, (long)((double)ed_slope*(pow(250*pow(10,-9),2))/(pow(2,-40))));
 	}
 }
 
@@ -368,13 +369,13 @@ static int ppm_init(int ch)
 		pctrl->speed.acc  =1;
 		pctrl->speed.dec  =1;
 		// 初期化動作のMIN_SPEED設定。
-		L6470_param_write(ch, 0x08, pctrl->speed.start);
+		L6470_param_write(ch, 0x08, (long)((double)pctrl->speed.start*(250*pow(10,-9))/(pow(2,-24))));
 		// 初期化動作のMAX_SPEED設定。
-		L6470_param_write(ch, 0x07, pctrl->speed.max);
+		L6470_param_write(ch, 0x07, (long)((double)pctrl->speed.max*(250*pow(10,-9))/(pow(2,-18))));
 		// ACC設定。
-		L6470_param_write(ch, 0x05, pctrl->speed.acc);
+		L6470_param_write(ch, 0x05, (long)((double)pctrl->speed.acc*(pow(250*pow(10,-9),2))/(pow(2,-40))));
 		// DEC設定。
-		L6470_param_write(ch, 0x06, pctrl->speed.dec);
+		L6470_param_write(ch, 0x06, (long)((double)pctrl->speed.dec*(pow(250*pow(10,-9),2))/(pow(2,-40))));
 
 		// home out
 		if (home_in_flag) {
@@ -527,8 +528,16 @@ static int sequence(int sock, int fd, int no)
 		break;
 	case 0x14:		// パルスモーターHOME(現在位置パルス分をCCW回転する)
 		if (!L6470_busy(pact->mno-1)) {
+			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
+			long abs_pos=L6470_param_read(pact->mno-1, 0x01);
 			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
-			L6470_cmd_write(pact->mno-1, 0x70, 1, 0);//GoHome
+			//L6470_write(pact->mno-1, 0x70);//GoHome
+			if (abs_pos&0x3fffff) {
+				L6470_cmd_write(pact->mno-1, cmd, 3, (~(abs_pos|0xffc00000))+1);//Move
+			}
+			else{
+				L6470_cmd_write(pact->mno-1, cmd, 3, abs_pos);//Move
+			}
 //			delay(10);
 			pseq->current++;
 		}
