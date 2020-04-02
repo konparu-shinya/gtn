@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <linux/serial.h>
 #include "wiringPi.h"
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
@@ -60,6 +61,9 @@ const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 #define EOT		0x04
 #define TIMEOUT	30000
 
+static const int rts=TIOCM_RTS;
+static const char cnt_head[]={0x0, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0};
+
 static char ack_msg_data[] = {STX, 0x04,0x01,0x00,0x11, ETX};
                                                                 //1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
 static char msg_msg_data[] = {STX, 0x29,0x00,0x00,0xC9,0x99,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3, ETX};
@@ -93,7 +97,8 @@ struct _cnt_tbl {
 	int max;					// カウントMax値
 	struct timespec tim_start;	// カウント取込み開始
 	char str_start[32];			// カウント取込み開始時刻文字列
-	char buf[1000][240];		// 1000秒のデータバッファ
+#define	CNT_SZ	400
+	char buf[1000][CNT_SZ];		// 1000秒のデータバッファ
 } static cnt_tbl={0, 0};
 
 // 動作シーケンス格納テーブル
@@ -427,31 +432,87 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// 先頭のカウント値を取り出す
+static long get_1st_data(int i)
+{
+	unsigned long dat=0L;
+	int j, k, l=0;
+	for (j=0; j<(CNT_SZ-3); ) {
+		if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
+			(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
+			(cnt_tbl.buf[i][j+2]&0xe0)==cnt_head[l+2] &&
+			(cnt_tbl.buf[i][j+3]&0xe0)==cnt_head[l+3]) {
+			//各4バイトの下位5ビットが測光データ20bits
+			for (k=0; k<=3; k++) {
+				dat += (cnt_tbl.buf[i][j+k]&0x1f) << (5*k);
+			}
+			break;
+		}
+		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
+		else{
+			for (j=j+1; j<CNT_SZ; j++) {
+				if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[0]) {
+					l=0;
+					break;
+				}
+				if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[4]) {
+					l=4;
+					break;
+				}
+			}
+		}
+	}
+	return dat;
+}
+
 // カウント値をファイルに保存する
 static int count_save(char *str)
 {
 	int ret=-1;
-	int i, j, k, l;
+	int i, j, k;
 	FILE *fp;
 	time_t t = time(NULL);
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&t));
 	fp=fopen(str, "w");
+printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 	if (fp) {
 		for (i=0; i<cnt_tbl.n; i++) {
 			unsigned long total=0L;
-			for (j=0, l=0; j<240; ) {
-				//各4バイトの下位5ビットが測光データ20bits
-				unsigned long dat=0L;
-				for (k=0; k<=3; k++) {
-					dat += (cnt_tbl.buf[i][j++]&0x1f) << (5*k);
+			int l=0, m=0;
+			for (j=0; j<(CNT_SZ-3); ) {
+				if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
+					(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
+					(cnt_tbl.buf[i][j+2]&0xe0)==cnt_head[l+2] &&
+					(cnt_tbl.buf[i][j+3]&0xe0)==cnt_head[l+3]) {
+					//各4バイトの下位5ビットが測光データ20bits
+					unsigned long dat=0L;
+					for (k=0; k<=3; k++) {
+						dat += (cnt_tbl.buf[i][j+k]&0x1f) << (5*k);
+					}
+					// min以上max以下の値の平均値を1秒間の測定値とする
+					if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
+						total += dat;
+						m++;
+					}
+					j+=4;
+					l = (l+4)%8;
 				}
-				// min以上max以下の値の平均値を1秒間の測定値とする
-				if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
-					total += dat;
-					l++;
+				// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
+				else{
+printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0);
+					for (j=j+1; j<CNT_SZ; j++) {
+						if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[0]) {
+							l=0;
+							break;
+						}
+						if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[4]) {
+							l=4;
+							break;
+						}
+					}
 				}
 			}
-			fprintf(fp, "%s,  %ld\r\n", cnt_tbl.str_start, (l>0L)?total/l:0L);
+			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
 		}
 		fclose(fp);
 		ret=0;
@@ -462,7 +523,7 @@ static int count_save(char *str)
 // シーケンス
 static int sequence(int sock, int fd, int no)
 {
-	int i, rts=TIOCM_RTS;
+	int i;
 	char str[32];
 	struct _seq_tbl *pseq = &seq_tbl[no-1];
 	struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
@@ -726,14 +787,14 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
-			cnt_tbl.next_flag=0;
 			cnt_tbl.min      =pact->start_pulse;
 			cnt_tbl.max      =pact->max_pulse;
-			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
-			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 			ioctl(fd, TIOCMBIC, &rts);
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIS, &rts);
+
+			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
+			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
 		else{
 			message(sock, no, 1, 1, "ERR カウントDevice OPEN");
@@ -766,28 +827,24 @@ static int sequence(int sock, int fd, int no)
 		sec  = tim_now.tv_sec - cnt_tbl.tim_start.tv_sec;
 
 		ioctl(fd, FIONREAD, &n);
-		if (n>=240) {
-			read( fd, cnt_tbl.buf[sec], 240 );
-//			tcflush(fd, TCIFLUSH);
-			ioctl(fd, TIOCMBIC, &rts);
-			cnt_tbl.next_flag=0;
-			cnt_tbl.n++;
-		}
-		else if(!cnt_tbl.next_flag) {
-			if (nsec>990000000) {
-				ioctl(fd, TIOCMBIS, &rts);
-				cnt_tbl.next_flag=1;
+		if (n>=CNT_SZ) {
+			if (cnt_tbl.n<1000) {
+				read(fd, cnt_tbl.buf[cnt_tbl.n], CNT_SZ);
+				cnt_tbl.n++;
 			}
 		}
 
-		// 取り込み終了判定
-		if (cnt_tbl.sec < sec) {
-			cnt_tbl.sec = sec;
-			sprintf(str, "カウント取込み:%lu秒", sec);
-			message(sock, no, 1, 3, str);
-		}
-		if (cnt_tbl.times <= sec) {
+		// 取り込み終了判定(取り込み開始ディレイがあるので+1まで取り込む)
+		if ((cnt_tbl.times+1) <= sec) {
+			// カウンターSTOP
+			ioctl(fd, TIOCMBIC, &rts);
 			cnt_tbl.busy=0;
+		}
+		// 1秒ごとの表示
+		else if (cnt_tbl.sec < sec) {
+			cnt_tbl.sec = sec;
+			sprintf(str, "取込:%lu秒 :%ld", sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
+			message(sock, no, 1, 3, str);
 		}
 	}
 
@@ -822,6 +879,9 @@ static int sequence(int sock, int fd, int no)
 			// カウント値取得済であればファイルに保存する
 			if (cnt_tbl.n>0) {
 				char tmp[32];
+				// カウンターSTOP
+				ioctl(fd, TIOCMBIC, &rts);
+				cnt_tbl.busy=0;
 				if (count_save(tmp)==0) {
 					sprintf(str, "FILE %s", tmp);
 					message(sock, no, 1, 1, str);
@@ -837,7 +897,7 @@ static int sequence(int sock, int fd, int no)
 }
 
 // コマンド受信処理
-static int dispatch(int sock, char *buf)
+static int dispatch(int sock, int fd, char *buf)
 {
 static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
@@ -979,7 +1039,16 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			}
 		}
 		// カウント強制停止
+		ioctl(fd, TIOCMBIC, &rts);
 		cnt_tbl.busy=0;
+		// カウント値取得済であればファイルに保存する
+		if (cnt_tbl.n>0) {
+			char tmp[32];
+			if (count_save(tmp)==0) {
+				sprintf(str, "FILE %s", tmp);
+				message(sock, no, 1, 1, str);
+			}
+		}
 	}
 	// スレッド生成
 	else if (id==0xC012) {
@@ -1014,7 +1083,7 @@ static int execute(int sock, int fd)
 			// ACK返信
 			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
 			// コマンド割り振り
-			dispatch(sock, buf);
+			dispatch(sock, fd, buf);
 		}
 
 		// シーケンス
@@ -1111,6 +1180,8 @@ int main(void)
 	unsigned short servPort = 9001;			//server port number
 	int on = 1, ret, i;
 
+	// カウンターSTOP
+	ioctl(fd, TIOCMBIC, &rts);
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");
