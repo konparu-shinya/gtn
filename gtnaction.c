@@ -120,7 +120,7 @@ struct _action_tbl {
 
 // パルスモーター管理テーブル
 struct _ppm_ctrl {
-	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:home/step
+	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby
 	int	ratio;
 	struct _init_pulse {
 		int	init;
@@ -369,6 +369,7 @@ static int ppm_init(int ch)
 
 	switch (pctrl->driving) {
 	case 0:		// 0:not use
+	case 5:		// 5:standby
 		pctrl->speed.start=pctrl->init_pulse.init;
 		pctrl->speed.max  =pctrl->init_pulse.init;
 		pctrl->speed.acc  =1;
