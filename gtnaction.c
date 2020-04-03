@@ -31,7 +31,9 @@
 #include <wiringPiSPI.h>
 
 // ヒーター温度
-#define	HEX2TEMP(a)	((double)(a)*1.6827-29.061)
+#define TARGET_TEMP		37.0
+#define	HEX2TEMP(a)	((double)(a)*0.0263-29.061)
+#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+29.061)/0.0263)
 static double	temp=0.0;
 
 // MAX1000との接続SPI０
@@ -256,6 +258,15 @@ static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
 		(*data) += (c<<(7-i));
 		delay(1);
 	}
+}
+
+// 温度設定
+static void config_temp(double target)
+{
+		unsigned char data[4]={0x29,0x40,0x80,0xc0};
+		data[2] += (unsigned char)(((unsigned short)TEMP2HEX(target))>>6); 
+		data[3] += (unsigned char)(TEMP2HEX(target)&0x3f);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 }
 
 // L6470に1byte送信
@@ -1121,10 +1132,16 @@ static int execute(int sock, int fd)
 		// 温度を取り込んで表示
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if (tim_last.tv_sec<tim_now.tv_sec) {
-			unsigned char data[4]={0x06, 0, 0, 0};
+			unsigned char data[4]={0x06,0x40,0x80,0xc0};
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			// OK
 			if (data[0]==1) {
-				temp = HEX2TEMP((((unsigned short)(data[2]&0x3f))<<6)+(unsigned short)(data[3]&0x3f));
+				temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+			}
+			// ERR
+			else if (data[0]==0x20) {
+				unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
+				wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
 			}
 			// 5秒ごとに表示
 			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
@@ -1230,6 +1247,8 @@ int main(void)
 		perror("SPI Setup failed:\n");
 		exit(EXIT_FAILURE);
 	}
+	// 温度設定
+	config_temp(TARGET_TEMP);
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");
