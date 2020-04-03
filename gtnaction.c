@@ -28,6 +28,14 @@
 #include <sys/ioctl.h>
 #include <linux/serial.h>
 #include "wiringPi.h"
+#include <wiringPiSPI.h>
+
+// ヒーター温度
+#define	HEX2TEMP(a)	((double)(a)*1.6827-29.061)
+static double	temp=0.0;
+
+// MAX1000との接続SPI０
+#define MAX_SPI_CHANNEL 0
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
 #define L6470_SPI_L6470 1
@@ -852,6 +860,9 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.sec = sec;
 			sprintf(str, "取込:%lu秒 :%ld", sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
 			message(sock, no, 1, 3, str);
+			// ベース画面への表示	
+			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
+			message(sock, 0, 1, 1, str);
 		}
 	}
 
@@ -1073,6 +1084,10 @@ static int execute(int sock, int fd)
 {
 	char buf[512], str[32];
 	int i, len=1;
+	struct timespec tim_last, tim_last2, tim_now;
+
+	clock_gettime(CLOCK_MONOTONIC, &tim_last);
+	tim_last2=tim_last;
 
 	while (len!=0) {
 
@@ -1100,6 +1115,23 @@ static int execute(int sock, int fd)
 			if (seq_tbl[i].run) {
 				sequence(sock, fd, i+1);
 			}
+		}
+
+		// 温度を取り込んで表示
+		clock_gettime(CLOCK_MONOTONIC, &tim_now);
+		if (tim_last.tv_sec<tim_now.tv_sec) {
+			unsigned char data[4]={0x06, 0, 0, 0};
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			if (data[0]==1) {
+				temp = HEX2TEMP((((unsigned short)(data[2]&0x3f))<<6)+(unsigned short)(data[3]&0x3f));
+			}
+			// 5秒ごとに表示
+			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
+				sprintf(str, "%.2f℃", temp);
+				message(sock, 0, 1, 1, str);
+				tim_last2=tim_now;
+			}
+			tim_last=tim_now;
 		}
 	}
 	return 0;
@@ -1191,6 +1223,12 @@ int main(void)
 
 	// カウンターSTOP
 	ioctl(fd, TIOCMBIC, &rts);
+
+	/* SPI channel 0 を 1MHz で開始 */
+	if (wiringPiSPISetupMode(MAX_SPI_CHANNEL, 1000000, 3) < 0) {
+		perror("SPI Setup failed:\n");
+		exit(EXIT_FAILURE);
+	}
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");

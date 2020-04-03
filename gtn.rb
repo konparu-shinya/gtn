@@ -343,9 +343,9 @@ class StartMessage
     @dialog.window_position = Gtk::Window::POS_CENTER
     @dialog.set_default_size 400, 80
     @dialog.modify_bg(Gtk::STATE_NORMAL, Gdk::Color.parse("#fffcc4"))
-	@dialog.add_button(Gtk::Stock::CLOSE, Gtk::Dialog::RESPONSE_CLOSE)
-	
-	label = Gtk::Label.new("A&T OPEN インターネットに接続してください");
+    @dialog.add_button(Gtk::Stock::CLOSE, Gtk::Dialog::RESPONSE_CLOSE)
+    
+    label = Gtk::Label.new("A&T OPEN インターネットに接続してください");
     label.show_all
     @dialog.vbox.add( label )
     # ダイアログを表示して戻りを処理する
@@ -2524,7 +2524,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
+  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
 
   def initialize( size )
 #    @prj_no = 1
@@ -2624,13 +2624,15 @@ class Gtn
     btnStart    = Gtk::Button.new( 'START' )
     btnStop     = Gtk::Button.new( 'EMG STOP' )
     btnClose    = Gtk::Button.new( '終了' )
-    @main_sts = Gtk::Label.new( "" )
+    @main_sts   = Gtk::Label.new( "" )
+    @main_info  = Gtk::Label.new( "" )
 
     group3 = Gtk::Table.new( 2, 2, false )
     group3.attach( @main_sts,                0,  3, 0, 1 )
-    group3.attach( btnStart,                 0,  1, 1, 2 )
-    group3.attach( btnStop,                  1,  2, 1, 2 )
-    group3.attach( btnClose,                 2,  3, 1, 2 )
+    group3.attach( @main_info,               0,  3, 1, 2 )
+    group3.attach( btnStart,                 0,  1, 2, 3 )
+    group3.attach( btnStop,                  1,  2, 2, 3 )
+    group3.attach( btnClose,                 2,  3, 2, 3 )
 
     # 全体
     table = Gtk::Table.new( 2, 62, false )
@@ -2901,10 +2903,10 @@ end
 # 通信オブジェクト生成
 $sock_port = MySocket.new
 
-StartMessage.new
+#StartMessage.new
 
 # MAIN画面表示
-$main_form = Gtn.new( 20 )
+$main_form = Gtn.new( 19 )
 
 if File.exist?( PrjNames )
   SelProject.new 
@@ -2916,6 +2918,11 @@ end
 Gtk.timeout_add( 200 ) do
   $sock_port.nt_recv_each do |rcv_msg|
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
+
+    # ベース画面のステータス表示
+    if my_no == 0 && msg
+      $main_form.main_info.set_text( msg )
+	end
 
     # ベース画面の各状態をstopに
     if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
