@@ -92,13 +92,14 @@ struct _cnt_tbl {
 	int n;						// 取り込んだデータ数
 	int	sec;					// カウント取り込み秒数表示
 	int	times;					// カウント取り込み秒数
-	int next_flag;				// 1:継続取り込み中＊1秒毎に240バイトのデータを取り込むデバイスである
+	int owner;					// 指示コンソールNo.
 	int min;					// カウントMin値
 	int max;					// カウントMax値
+	time_t t;					// カウント取込み開始
 	struct timespec tim_start;	// カウント取込み開始
 	char str_start[32];			// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
-	char buf[1000][CNT_SZ];		// 1000秒のデータバッファ
+	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
 } static cnt_tbl={0, 0};
 
 // 動作シーケンス格納テーブル
@@ -437,7 +438,8 @@ static int ppm_init(int ch)
 static long get_1st_data(int i)
 {
 	unsigned long dat=0L;
-	int j, k, l=0;
+	int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
+	int j, k;
 	for (j=0; j<(CNT_SZ-3); ) {
 		if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
 			(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
@@ -472,14 +474,14 @@ static int count_save(char *str)
 	int ret=-1;
 	int i, j, k;
 	FILE *fp;
-	time_t t = time(NULL);
-	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&t));
+	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
 printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 	if (fp) {
 		for (i=0; i<cnt_tbl.n; i++) {
 			unsigned long total=0L;
-			int l=0, m=0;
+			int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
+			int m=0;
 			for (j=0; j<(CNT_SZ-3); ) {
 				if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
 					(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
@@ -513,7 +515,8 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 					}
 				}
 			}
-			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+//			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+			fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?total/m:0L);
 		}
 		fclose(fp);
 		ret=0;
@@ -788,12 +791,15 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
-			cnt_tbl.min      =pact->start_pulse;
-			cnt_tbl.max      =pact->max_pulse;
+			cnt_tbl.owner    =no;
+			cnt_tbl.min      =pact->start_pulse + (pact->max_pulse<<16);
+			cnt_tbl.max      =pact->st_slope + (pact->ed_slope<<16);
+
 			ioctl(fd, TIOCMBIC, &rts);
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIS, &rts);
 
+			cnt_tbl.t = t;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
@@ -829,7 +835,7 @@ static int sequence(int sock, int fd, int no)
 
 		ioctl(fd, FIONREAD, &n);
 		if (n>=CNT_SZ) {
-			if (cnt_tbl.n<1000) {
+			if (cnt_tbl.n<2000) {
 				read(fd, cnt_tbl.buf[cnt_tbl.n], CNT_SZ);
 				cnt_tbl.n++;
 			}
@@ -878,7 +884,7 @@ static int sequence(int sock, int fd, int no)
 				message(sock, no, 2, 0, str);
 			}
 			// カウント値取得済であればファイルに保存する
-			if (cnt_tbl.n>0) {
+			if (cnt_tbl.owner==no && cnt_tbl.n>0) {
 				char tmp[32];
 				// カウンターSTOP
 				ioctl(fd, TIOCMBIC, &rts);
@@ -887,6 +893,7 @@ static int sequence(int sock, int fd, int no)
 					sprintf(str, "FILE %s", tmp);
 					message(sock, no, 1, 1, str);
 				}
+				cnt_tbl.n=0;
 			}
 		}
 		// Next
@@ -1049,6 +1056,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 				sprintf(str, "FILE %s", tmp);
 				message(sock, no, 1, 1, str);
 			}
+			cnt_tbl.n=0;
 		}
 	}
 	// スレッド生成

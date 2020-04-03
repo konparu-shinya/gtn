@@ -208,7 +208,7 @@ end
 def dcmotor_reg_init
 
   return  if !File.exist?( $main_form.file_dcm )
-  print "dcmotor_reg_init:#{$main_form.file_dcm}¥n"
+  p "dcmotor_reg_init:#{$main_form.file_dcm}¥r"
 
   open( $main_form.file_dcm, "r" ) do |file|
     while line = file.gets
@@ -237,7 +237,7 @@ end
 def motor_reg_init
 
   return  if !File.exist?( $main_form.file_ppm )
-  print "motor_reg_init:#{$main_form.file_ppm}¥n"
+  p "motor_reg_init:#{$main_form.file_ppm}¥r"
 
   open( $main_form.file_ppm, "r" ) do |file|
     while line = file.gets
@@ -314,7 +314,11 @@ def action_info_send(console_no, ary)
   when "EVENT"
     cmd[8] = $act_hash_evt.key(ary[5]) if $act_hash_evt.key(ary[5])
   when "MEAS"
-    cmd[8] = $act_hash_adc.key(ary[5]) if $act_hash_adc.key(ary[5])
+    cmd[ 8] = $act_hash_adc.key(ary[5]) if $act_hash_adc.key(ary[5])
+    cmd[10] = ary[7].to_i      # 自起動(min 32bit)
+    cmd[11] = ary[7].to_i>>16  # 自起動(min 32bit)
+    cmd[12] = ary[8].to_i      # 最高速(max 32bit)
+    cmd[13] = ary[8].to_i>>16  # 最高速(max 32bit)
   end
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
@@ -2950,22 +2954,6 @@ Gtk.timeout_add( 200 ) do
             end
           end
         end
-      # A/D取り込みファイル
-      elsif line == 1 && msg =~ /FILE/ && MailTo
-        file = msg.split(/\s/)[-1]
-        name = msg.split(/\//)[-1]
-        # gmail送信
-        gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
-        gmail.deliver do
-          to MailTo
-          subject "測定レポート:#{name}"
-          #text_part do
-          #  body "本文"
-          #end
-          add_file file
-        end
-        gmail.logout
-        File.unlink file
       # その他は黒文字
       else
         style = Gtk::Style.new
@@ -3000,6 +2988,26 @@ Gtk.timeout_add( 200 ) do
           $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)
         end
       end while iter.next!
+    end
+
+    # A/D取り込みファイルのgmail送信
+    if line == 1 && msg && MailTo
+      if msg =~ /FILE/
+        file = msg.split(/\s/)[-1]
+        name = msg.split(/\//)[-1]
+        # gmail送信
+        gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
+        gmail.deliver do
+          to MailTo
+          subject "測定レポート:#{name}"
+          #text_part do
+          #  body "本文"
+          #end
+          add_file file
+        end
+        gmail.logout
+        File.unlink file
+      end
     end
   end
   true
