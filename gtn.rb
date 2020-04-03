@@ -431,8 +431,8 @@ class SelProject
       # 画面更新
       $main_form.show
 
-      # Tnet I/O設定
-#     set_tnet
+      # スレッド通知
+      $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC012, $main_form.prj_no, gpio_info(), 0x00, ETX], 'C4nC4' ) if $sock_port.open_err == nil
       # モータレジスタの初期化
       motor_reg_init
       dcmotor_reg_init
@@ -2821,10 +2821,6 @@ class Gtn
     return if $main_form.file_config == nil
 
     $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC016, 0, 0x00, ETX], 'C4nC3' ) if $sock_port.open_err == nil
-
-    # モータレジスタの初期化
-    motor_reg_init
-    dcmotor_reg_init
   end
 
   # configファイルに書き出す

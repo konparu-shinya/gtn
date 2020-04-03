@@ -976,9 +976,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	// 動作準備
 	else if (id==0xC014) {
 		int no = (int)((unsigned char)buf[6]);
-		int gpio = (int)((unsigned char)buf[7]);
 		struct _seq_tbl *pseq = &seq_tbl[no-1];
-		int count;
 		if (pseq->run==0) {
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
 			memset(pseq, 0, sizeof(seq_tbl));
@@ -989,17 +987,6 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
 			message(sock, no, 1, 3, "");
-			/* GPIO IN/OUT設定 */
-			for (count=0; GPIO_CH[count]; count++);
-			for (i=0; GPIO_CH[i]; i++) {
-				if ((gpio>>(count-i-1))&0x01) {
-					pinMode(GPIO_CH[i], OUTPUT);
-					digitalWrite(GPIO_CH[i], 0);
-				}
-				else{
-					pinMode(GPIO_CH[i], INPUT);
-				}
-			}
 		}
 	}
 	// 動作開始
@@ -1072,6 +1059,20 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	}
 	// スレッド生成
 	else if (id==0xC012) {
+		int no = (int)((unsigned char)buf[6]);
+		int gpio = (int)((unsigned char)buf[7]);
+		int count, i;
+		/* GPIO IN/OUT設定 */
+		for (count=0; GPIO_CH[count]; count++);
+		for (i=0; GPIO_CH[i]; i++) {
+			if ((gpio>>(count-i-1))&0x01) {
+				pinMode(GPIO_CH[i], OUTPUT);
+				digitalWrite(GPIO_CH[i], 0);
+			}
+			else{
+				pinMode(GPIO_CH[i], INPUT);
+			}
+		}
 	}
 	// スレッド停止
 	else if (id==0xC013) {
