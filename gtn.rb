@@ -326,6 +326,10 @@ end
 # GPIO情報の取得
 def gpio_info
   ret = 0
+
+  # ファイルが無ければすべてINポート
+  return ret unless File.exist?( $main_form.file_gpio )
+
   open( $main_form.file_gpio, "r" ) do |f|
     while line = f.gets
       ret = (ret << 1 ) + ((line == "IN\n") ? 0:1)
@@ -1185,10 +1189,17 @@ class Gpio
       @box.push ary
     end
 
-    open( $main_form.file_gpio, "r" ) do |f|
-      @box.each do |ary|
-        ary[2].active = true if f.gets == "IN\n"
+    if File.exist?( $main_form.file_gpio )
+      open( $main_form.file_gpio, "r" ) do |f|
+        @box.each do |ary|
+          ary[2].active = true if f.gets == "IN\n"
+        end
       end
+    # ファイルが無ければすべてINポート
+    else
+        @box.each do |ary|
+          ary[2].active = true
+        end
     end
 
     table = Gtk::Table.new( 2, 3, false )
@@ -2918,7 +2929,7 @@ Gtk.timeout_add( 200 ) do
     # ベース画面のステータス表示
     if my_no == 0 && msg
       $main_form.main_info.set_text( msg )
-	end
+    end
 
     # ベース画面の各状態をstopに
     if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
