@@ -2929,8 +2929,8 @@ kon
           i   = ary[0].to_i
           if i <= @size && ary.size == 8
             @name[ i-1 ].set_text( ary[1] )
-            @start[ i-1 ].set_value( ary[2].to_i )
-            @stop[ i-1 ].set_value( ary[3].to_i )
+           #@start[ i-1 ].set_value( ary[2].to_i )
+           #@stop[ i-1 ].set_value( ary[3].to_i )
             @loop[ i-1 ].set_value( ary[4].to_i )
             @delay_no[ i-1 ].set_value( ary[5].to_i )
             @delay_time[ i-1 ].set_value( ary[6].to_i )
@@ -2941,8 +2941,8 @@ kon
     else
       ( 1..@size ).each do |i|
         @name[ i-1 ].set_text( '' )
-        @start[ i-1 ].set_value( 1 )
-        @stop[ i-1 ].set_value( 1 )
+       #@start[ i-1 ].set_value( 1 )
+       #@stop[ i-1 ].set_value( 1 )
         @loop[ i-1 ].set_value( 1 )
         @delay_no[ i-1 ].set_value( 0 )
         @delay_time[ i-1 ].set_value( 0 )
@@ -2956,6 +2956,9 @@ kon
         ary = IO.readlines(fname)
         @start[ i-1 ].set_value( ary[0].chop.split( /,/ )[0].to_i ) if ary[0]
         @stop[ i-1 ].set_value( ary[-1].chop.split( /,/ )[0].to_i ) if ary[-1]
+      else
+        @start[ i-1 ].set_value( 1 )
+        @stop[ i-1 ].set_value( 1 )
       end
     end
   end
