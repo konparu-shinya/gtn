@@ -45,6 +45,9 @@ CommentTitle = 'コメント(先頭に#を付けると実行しません)'
 IFCmt = 'if (RegA & Mask) == Value then goto'
 UNCmt = 'if (RegA & Mask) != Value then goto'
 
+CancelSt = '=無効開始'
+CancelEd = '=無効終了'
+
 ADDevFile = '/dev/adm686z'
 
 $sio_dev = Array.new( 20, nil )
@@ -579,6 +582,7 @@ class ActCopy
       end
 
       if "#{lblSts.text}".size < 1
+p [__LINE__, fcp_name, tcp_name]
         # コピー
         FileUtils.cp( fcp_name, tcp_name )
 
@@ -1628,6 +1632,11 @@ class Input
     @edtErBitNo     = Gtk::Entry.new()
     btnErWrite      = Gtk::Button.new( '書込み' )
 
+    # Edit コメント new
+    @edtComComment  = Gtk::Entry.new()
+    @cmbComAction   = Gtk::Combo.new()
+    btnComWrite     = Gtk::Button.new( '書込み' )
+
     # Edit Wait 配置
     table4_41 = Gtk::Table.new( 3, 4, false )
     table4_41.attach( Gtk::Label.new( CommentTitle ), 0, 3, 0, 1 )
@@ -1684,6 +1693,14 @@ class Input
     table4_45.attach( @edtErBitNo,                           5, 6, 1, 2 )
     table4_45.attach( btnErWrite,                            0, 6, 3, 4 )
 
+    # Edit コメント 配置
+    table4_46 = Gtk::Table.new( 3, 4, false )
+    table4_46.attach( Gtk::Label.new( CommentTitle ),        0, 4, 0, 1 )
+    table4_46.attach( Gtk::Label.new( "Action" ),            4, 6, 0, 1 )
+    table4_46.attach( @edtComComment,                        0, 4, 1, 2 )
+    table4_46.attach( @cmbComAction,                         4, 6, 1, 2 )
+    table4_46.attach( btnComWrite,                           0, 6, 3, 4 )
+
     # Edit 命令文 配置
     @nbook4_4 = Gtk::Notebook.new()
     @nbook4_4.append_page( table4_41,  Gtk::Label.new( ' Wait ' ) )
@@ -1691,6 +1708,7 @@ class Input
     @nbook4_4.append_page( table4_43,  Gtk::Label.new( ' if not ' ) )
     @nbook4_4.append_page( table4_44,  Gtk::Label.new( ' goto ' ) )
     @nbook4_4.append_page( table4_45,  Gtk::Label.new( ' error ' ) )
+    @nbook4_4.append_page( table4_46,  Gtk::Label.new( ' コメント行 ' ) )
 
     # Edit SIO new
     @edtSComment  = Gtk::Entry.new()
@@ -1817,6 +1835,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     btnUWrite.signal_connect( 'clicked' ){ unless_write_clicked }
     btnGWrite.signal_connect( 'clicked' ){ goto_write_clicked }
     btnErWrite.signal_connect( 'clicked' ){ error_write_clicked }
+    btnComWrite.signal_connect( 'clicked' ){ comment_write_clicked }
     btnEWrite.signal_connect( 'clicked' ){ event_write_clicked }
     btnMWrite.signal_connect( 'clicked' ){ meas_write_clicked }
     btnGo.signal_connect( 'clicked' ){ go_clicked }
@@ -1832,6 +1851,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @cmbDAction.set_popdown_strings( $act_hash_dio.values )
     @cmbEAction.set_popdown_strings( $act_hash_evt.values )
     @cmbMAction.set_popdown_strings( $act_hash_adc.values )
+    @cmbComAction.set_popdown_strings( [CancelSt, CancelEd] )
 
     # コラムリストに表示
     fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
@@ -1911,6 +1931,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @edtUComment.set_text( iter.get_value(1) )
     @edtGComment.set_text( iter.get_value(1) )
     @edtErComment.set_text( iter.get_value(1) )
+    @edtComComment.set_text( iter.get_value(1) )
     @edtEComment.set_text( iter.get_value(1) )
     @edtMComment.set_text( iter.get_value(1) )
 
@@ -1972,6 +1993,10 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @spnBtnErPort.set_value( ary[1].to_i )
       @edtErBitNo.set_text( iter.get_value(5) )
       @nbook4_4.set_page( 4 )
+    when "COMMENT"
+      @nbook.set_page( 3 )
+      @cmbComAction.entry.set_text( iter.get_value(4) )
+      @nbook4_4.set_page( 5 )
     when "SIO"
       @spnBtnSCh.set_value( iter.get_value(3).to_i )
       @cbCr.active = ( iter.get_value(4) == 'SIO ADD CR' ) ? true : false
@@ -2243,6 +2268,22 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @clist_change = true
   end
 
+  # コメント書込み
+  def comment_write_clicked
+    fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
+            "#{@edtComComment.text}", 
+            'COMMENT',
+            '',
+            '',
+            "#{@cmbComAction.entry.text}", 
+            "-", "-", "-", "-", "-", "-", "-", "-", "-" ]
+    clist_write( fmt )
+    # ステータスクリア
+    clear_status
+
+    @clist_change = true
+  end
+
   # EVENT書込み
   def event_write_clicked
     fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
@@ -2461,12 +2502,20 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
       if File.exist?( fname )
         open( fname, "r" ) do |f|
+          cancel = nil
           while line = f.gets
             ary = (line.chop).split( /,/ )
+
+p [__LINE__, ary[5]]
+            cancel = true if ary[5] == CancelSt
+            cancel = nil  if ary[5] == CancelEd
 
             next if ary[0].to_i < start_line
             next if ary[0].to_i > stop_line
             next if (ary[1])[ 0, 1 ] == "#"
+            next if ary[5] == CancelEd
+            next cancel
+kon
 
             action_info_send(@my_console_no, ary)
           end
@@ -2807,12 +2856,20 @@ class Gtn
         fname = $main_form.file_action + "#{i}" + Kakuchou_si
         if File.exist?( fname )
           open( fname, "r" ) do |f|
+            cancel = nil
             while line = f.gets
               ary = (line.chop).split( /,/ )
 
+p [__LINE__, ary[5]]
+              cancel = true if ary[5] == CancelSt
+              cancel = nil  if ary[5] == CancelEd
+
               next if ary[0].to_i < @start[ i-1 ].value_as_int
               next if ary[0].to_i > @stop[ i-1 ].value_as_int
+              next if ary[5] == CancelEd
               next if (ary[1])[ 0, 1 ] == "#"
+              next cancel
+kon
 
               action_info_send(i, ary)
             end
