@@ -1887,6 +1887,14 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       end
     end
 
+    # START/STOP行はactionファイルの開始行と終了行を表示する
+    fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
+    if File.exist?( fname )
+      ary = IO.readlines(fname)
+      $main_form.start[ @my_console_no-1 ].set_value( ary[0].chop.split( /,/ )[0].to_i ) if ary[0]
+      $main_form.stop[ @my_console_no-1 ].set_value( ary[-1].chop.split( /,/ )[0].to_i ) if ary[-1]
+    end
+
     # main formへ終了通知
     $main_form.console_opened[ @my_console_no ] = nil
   end
@@ -2280,8 +2288,8 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     if cur_ary[0]
       execute( cur_ary[0], cur_ary[-1], 0 )
       # main formへline通知
-      $main_form.start[ @my_console_no-1 ].set_value( cur_ary[0] )
-      $main_form.stop[ @my_console_no-1 ].set_value( cur_ary[-1] )
+      #$main_form.start[ @my_console_no-1 ].set_value( cur_ary[0] )
+      #$main_form.stop[ @my_console_no-1 ].set_value( cur_ary[-1] )
     else
       @lblStatus[0].set_text( "実行範囲が選ばれていません" )
       # 赤文字
@@ -2856,6 +2864,7 @@ class Gtn
 
   # 表示
   def show
+    # configファイルから呼び出して表示する
     if File.exist?( $main_form.file_config )
       open( $main_form.file_config, 'r' ) do |f|
         while line = f.gets
@@ -2881,6 +2890,15 @@ class Gtn
         @delay_no[ i-1 ].set_value( 0 )
         @delay_time[ i-1 ].set_value( 0 )
         @delay_sec[ i-1 ].set_value( 0 )
+      end
+    end
+    # START/STOP行はactionファイルの開始行と終了行を表示する
+    (1..@size).each do |i|
+      fname = $main_form.file_action + "#{i}" + Kakuchou_si
+      if File.exist?( fname )
+        ary = IO.readlines(fname)
+        @start[ i-1 ].set_value( ary[0].chop.split( /,/ )[0].to_i ) if ary[0]
+        @stop[ i-1 ].set_value( ary[-1].chop.split( /,/ )[0].to_i ) if ary[-1]
       end
     end
   end
