@@ -2,7 +2,7 @@
 
 require 'gtk2'
 #require 'kconv'
-#require 'FileUtils'
+require 'fileutils'
 require 'socket'
 require 'gmail'
 

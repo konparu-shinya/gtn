@@ -28,7 +28,7 @@
 #include <sys/ioctl.h>
 #include <linux/serial.h>
 #include "wiringPi.h"
-#include <wiringPiSPI.h>
+#include "wiringPiSPI.h"
 
 // ヒーター温度
 #define TARGET_TEMP		37.0
