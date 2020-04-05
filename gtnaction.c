@@ -1070,7 +1070,6 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	}
 	// スレッド生成
 	else if (id==0xC012) {
-		int no = (int)((unsigned char)buf[6]);
 		int gpio = (int)((unsigned char)buf[7]);
 		int count, i;
 		/* GPIO IN/OUT設定 */
