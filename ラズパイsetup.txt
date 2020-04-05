@@ -5,14 +5,19 @@
 
 2./boot/config.txt
 dtparam=spi=on
+enable_uart=1
+※ラズパイの設定画面からでも変更可能
 
-3.Wifi 
+3./boot/cmdline.txt
+エディタで開き、”console=serial0,115200”を削除する
+
+4.Wifi 
 A&T OPENに接続 password=67226722
 
 ブラウザから以下のURLを開いて「インターネットへ接続する」をクリック
 https://n249.network-auth.com/splash/?mac=0C:8D:DB:94:38:D9&real_ip=10.169.152.50&client_ip=10.169.152.50&client_mac=B8:27:EB:48:12:DA&vap=2&a=472b07b9fcf2c2451e8781e944bf5f77cd8457c8&b=18744256&auth_version=5&key=9b327cba2546a9c7977a0f99141aff3022a6bbb0&acl_ver=P6066040V2&continue_url=http://raspbian.raspberrypi.org/raspbian
 
-4.ターミナルから実行
+5.ターミナルから実行
 $ sudo apt-get updateを実行
 $ sudo apt-get install fcitx-mozc
 再起動
@@ -22,19 +27,31 @@ $ sudo apt-get install fcitx-mozc
 
 $ sudo apt-get install vim-gtk
 $ sudo apt-get install ruby-gtk2
-$ sudo gem install ruby-gmail    ※必要かな...
+$ sudo gem install ruby-gmail    ※Ver.0.7.1以上であること。古い場合は一度削除して再度インストール
 
-5.プリエンプションカーネルRTLinux
+6.プリエンプションカーネルRTLinux
 /lib/modules/4.14.91-rt49-v7+ 
 /boot/  にカーネルを
 
-6.ソースコード
+7.ソースコード
 $ mkdir gtn
 $ cd gtn
 $ git clone https://github.com/konparu-shinya/gtn.git 
 $ gcc -o gtnaction gtnaction.c -lwiringPi
 
-7.起動
+8.起動
 ./gtnaction
 ruby gtn.rb
+
+
+※LCD接続の/boot/config.txt設定
+hdmi_force_hotplug=1
+max_usb_current=1
+hdmi_drive=1
+hdmi_group=2
+hdmi_mode=1
+hdmi_mode=87
+hdmi_cvt 1024 600 60 6 0 0 0
+
+
 
