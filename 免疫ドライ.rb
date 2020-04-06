@@ -343,7 +343,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action, :file_ana
+  attr_accessor :prj_no, :console_opened, :enSerial, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action, :file_ana
 
   def initialize()
 
@@ -374,43 +374,56 @@ class Gtn
     # メニューの作成
     @enSerial  = Gtk::Entry.new()
     gouki      = Gtk::Label.new('号機番号:')
-    btnInit    = Gtk::Button.new( 'イニシャライズ' )
-    btnPrimeA  = Gtk::Button.new( 'プライム' )
-    btnPrimeB  = Gtk::Button.new( 'プライム(カード使用)' )
+    btnStop    = Gtk::Button.new( '停止' )
     btnCntRcv  = Gtk::Button.new( 'カウント取込み' )
     btnStart   = Gtk::Button.new( '測定開始' )
-    btnStop    = Gtk::Button.new( '停止' )
+    btnPrimeA  = Gtk::Button.new( 'プライム' )
+    btnPrimeB  = Gtk::Button.new( 'プライム(カード使用)' )
+    btnInit    = Gtk::Button.new( 'イニシャライズ' )
+    btnNZUp    = Gtk::Button.new( 'ノズルUP' )
+    btnNZDn    = Gtk::Button.new( 'ノズルDown' )
+    btnSyrUp   = Gtk::Button.new( 'シリンジUP' )
+    btnSyrDn   = Gtk::Button.new( 'シリンジDown' )
+    btnMixMove = Gtk::Button.new( '撹拌回転' )
     @main_sts  = Gtk::Label.new( "" )
     @main_info = Gtk::Label.new( "" )
 
     table = Gtk::Table.new( 1, 6, true )
     table.attach( gouki,        0, 1, 0, 1 )
     table.attach( @enSerial,    1, 2, 0, 1 )
-    table.attach( btnCntRcv,    1, 2, 1, 2 )
-    table.attach( btnInit,      2, 3, 1, 2 )
-    table.attach( btnStart,     1, 2, 2, 4 )
-    table.attach( btnPrimeA,    2, 3, 2, 3 )
-    table.attach( btnPrimeB,    2, 3, 3, 4 )
-    table.attach( btnStop,      4, 5, 1, 3 )
-    table.attach( @main_sts,    1, 5, 4, 5 )
-    table.attach( @main_info,   1, 5, 5, 6 )
+
+    table.attach( btnCntRcv,    1, 2, 1, 3 )
+    table.attach( btnPrimeA,    2, 3, 1, 3 )
+    table.attach( btnInit,      3, 4, 1, 2 )
+    table.attach( btnStop,      4, 5, 1, 4 )
+    table.attach( btnNZUp,      3, 4, 2, 3 )
+
+    table.attach( btnStart,     1, 2, 3, 5 )
+    table.attach( btnPrimeB,    2, 3, 3, 5 )
+    table.attach( btnNZDn,      3, 4, 3, 4 )
+    table.attach( btnSyrUp,     3, 4, 4, 5 )
+    table.attach( btnSyrDn,     3, 4, 5, 6 )
+    table.attach( btnMixMove,   3, 4, 6, 7 )
+
+    table.attach( @main_sts,    1, 5, 7, 8 )
+    table.attach( @main_info,   1, 5, 8, 9 )
 
     form.add table
     form.show_all
 
     # シグナル定義
     btnInit.signal_connect( 'clicked' ){ init_clicked }
+    btnNZUp.signal_connect( 'clicked' ){ nozzle_up_clicked }
+    btnNZDn.signal_connect( 'clicked' ){ nozzle_dn_clicked }
+    btnSyrUp.signal_connect( 'clicked' ){ syringe_up_clicked }
+    btnSyrDn.signal_connect( 'clicked' ){ syringe_dn_clicked }
+    btnMixMove.signal_connect( 'clicked' ){ mix_Move_clicked }
     btnPrimeA.signal_connect( 'clicked' ){ prime_a_clicked }
     btnPrimeB.signal_connect( 'clicked' ){ prime_b_clicked }
     btnCntRcv.signal_connect( 'clicked' ){ count_clicked }
     btnStart.signal_connect( 'clicked' ){ start_clicked }
     btnStop.signal_connect( 'clicked' ){ stop_clicked }
 
-  end
-
-  # 号機番号
-  def ana_no_changed
-p [__LINE__]
   end
 
   # Init
@@ -421,24 +434,82 @@ p [__LINE__]
     @run[0].active = false
   end
 
+  # ノズルUP
+  def nozzle_up_clicked
+    # 9番
+    @run[8].active = true
+    execute
+    @run[8].active = false
+  end
+
+  # ノズルDown
+  def nozzle_dn_clicked
+    # 10番
+    @run[9].active = true
+    execute
+    @run[9].active = false
+  end
+
+  # シリンジUP
+  def syringe_up_clicked
+    # 11番
+    @run[10].active = true
+    execute
+    @run[10].active = false
+  end
+
+  # シリンジDown
+  def syringe_dn_clicked
+    # 12番
+    @run[11].active = true
+    execute
+    @run[11].active = false
+  end
+
+  # 撹拌回転
+  def mix_Move_clicked
+    # 13番
+    @run[12].active = true
+    execute
+    @run[12].active = false
+  end
+
   # プライム
   def prime_a_clicked
+    # 18番
+    @run[17].active = true
     execute
+    @run[17].active = false
   end
 
   # プライム(カード使用)
   def prime_b_clicked
+    # 19番
+    @run[18].active = true
     execute
+    @run[18].active = false
   end
 
   # カウント受信
   def count_clicked
+    # 8番
+    @run[7].active = true
     execute
+    @run[7].active = false
   end
 
   # Start
   def start_clicked
+    # 2-5番
+    @run[1].active = true
+    @run[2].active = true
+    @run[3].active = true
+    @run[4].active = true
     execute
+    @run[1].active = false
+    @run[2].active = false
+    @run[3].active = false
+    @run[4].active = false
   end
 
   def execute
@@ -475,7 +546,6 @@ p [__LINE__]
               next if (ary[1])[ 0, 1 ] == "#"
               next if cancel
 
-p [__LINE__, ary]
               action_info_send(i, ary)
             end
           end
@@ -674,7 +744,7 @@ Gtk.timeout_add( 200 ) do
         gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
         gmail.deliver do
           to MailTo
-          subject "測定レポート:#{name}"
+          subject "#{$main_form.enSerial.text}号機 測定レポート:#{name}"
           #text_part do
           #  body "本文"
           #end
