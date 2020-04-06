@@ -391,22 +391,23 @@ class Gtn
     table = Gtk::Table.new( 1, 6, true )
     table.attach( gouki,        0, 1, 0, 1 )
     table.attach( @enSerial,    1, 2, 0, 1 )
+    table.attach( btnCntRcv,    0, 1, 1, 5 )
+    table.attach( btnPrimeA,    1, 2, 1, 5 )
+    table.attach( btnStart,     0, 1, 5, 9 )
+    table.attach( btnPrimeB,    1, 2, 5, 9 )
 
-    table.attach( btnCntRcv,    1, 2, 1, 3 )
-    table.attach( btnPrimeA,    2, 3, 1, 3 )
-    table.attach( btnInit,      3, 4, 1, 2 )
-    table.attach( btnStop,      4, 5, 1, 4 )
-    table.attach( btnNZUp,      3, 4, 2, 3 )
+    table.attach( btnInit,      3, 4, 1, 4 )
+    table.attach( btnMixMove,   4, 5, 1, 4 )
+    table.attach( btnNZUp,      3, 4, 4, 7 )
+    table.attach( btnSyrUp,     4, 5, 4, 7 )
+    table.attach( btnNZDn,      3, 4, 7,10 )
+    table.attach( btnSyrDn,     4, 5, 7,10 )
 
-    table.attach( btnStart,     1, 2, 3, 5 )
-    table.attach( btnPrimeB,    2, 3, 3, 5 )
-    table.attach( btnNZDn,      3, 4, 3, 4 )
-    table.attach( btnSyrUp,     3, 4, 4, 5 )
-    table.attach( btnSyrDn,     3, 4, 5, 6 )
-    table.attach( btnMixMove,   3, 4, 6, 7 )
+    table.attach( btnStop,      5, 6, 1,10 )
 
-    table.attach( @main_sts,    1, 5, 7, 8 )
-    table.attach( @main_info,   1, 5, 8, 9 )
+
+    table.attach( @main_sts,    1, 5,10,11 )
+    table.attach( @main_info,   1, 5,11,12 )
 
     form.add table
     form.show_all
@@ -423,7 +424,6 @@ class Gtn
     btnCntRcv.signal_connect( 'clicked' ){ count_clicked }
     btnStart.signal_connect( 'clicked' ){ start_clicked }
     btnStop.signal_connect( 'clicked' ){ stop_clicked }
-
   end
 
   # Init
@@ -550,6 +550,11 @@ class Gtn
             end
           end
         end
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 18")
+       #style.set_fg(Gtk::STATE_NORMAL, 0, 65535, 0)
+        style.set_fg(Gtk::STATE_NORMAL, 0, 60000, 0)
+        $main_form.main_sts.style = style
         $main_form.main_sts.set_text( "RUN" )
       else
         $main_form.main_sts.set_text( "Socket送受信エラー!!" )
@@ -630,6 +635,9 @@ class Gtn
         @stop[ i-1 ].set_value( 1 )
       end
     end
+
+    # 起動時Init.
+    init_clicked
   end
 
   def exit_seq
@@ -667,6 +675,10 @@ Gtk.timeout_add( 200 ) do
       $main_form.status[ my_no-1 ].set_text( 'stop' )
       # 全てstopであれば全体ステータスを表示
       if $main_form.status.map { |x| x.text }.uniq == ['stop']
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+        $main_form.main_sts.style = style
         $main_form.main_sts.set_text( msg )
       end
     end
