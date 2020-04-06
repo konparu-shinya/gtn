@@ -1131,20 +1131,31 @@ static int execute(int sock, int fd)
 		// 温度を取り込んで表示
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if (tim_last.tv_sec<tim_now.tv_sec) {
-			unsigned char data[4]={0x06,0x40,0x80,0xc0};
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-			// OK
-			if (data[0]==1) {
-				temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+        static int flag=0, led_conf=0;
+            flag^=1;
+            // 温度
+            if (flag) {
+    			unsigned char data[4]={0x06,0x40,0x80,0xc0};
+	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+		    	// OK
+			    if (data[0]==1) {
+				    temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+    			}
+	    		// ERR
+		    	else if (data[0]==0x20) {
+			    	unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
+				    wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
+                }
 			}
-			// ERR
-			else if (data[0]==0x20) {
-				unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
-				wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
-			}
+            // LED設定値
+            else{
+    			unsigned char data[4]={0x05,0x40,0x80,0xc0};
+	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+                led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
+            }
 			// 5秒ごとに表示
 			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
-				sprintf(str, "%.2f℃", temp);
+				sprintf(str, "%03X %.2f℃", led_conf, temp);
 				message(sock, 0, 1, 1, str);
 				tim_last2=tim_now;
 			}
