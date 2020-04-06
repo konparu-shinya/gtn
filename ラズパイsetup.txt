@@ -8,6 +8,11 @@ dtparam=spi=on
 enable_uart=1
 ※ラズパイの設定画面からでも変更可能
 
+/boot/config.txt へ以下の行を追加する 
+# Set GPIO2 to be an output set to 0
+gpio=2-3=op,dl
+
+
 3./boot/cmdline.txt
 エディタで開き、”console=serial0,115200”を削除する
 
