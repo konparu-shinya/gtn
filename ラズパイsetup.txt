@@ -58,5 +58,7 @@ hdmi_mode=1
 hdmi_mode=87
 hdmi_cvt 1024 600 60 6 0 0 0
 
-
-
+autostart
+$ mkdir -p ~/.config/lxsession/LXDE-pi
+$ cp /etc/xdg/lxsession/LXDE-pi/autostart ~/.config/lxsession/LXDE-pi/
+あとは、~/.config/lxsession/LXDE-pi/autostartファイルに実行したいコマンド名を追記するだけです。
