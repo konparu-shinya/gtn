@@ -28,6 +28,16 @@
 #include <sys/ioctl.h>
 #include <linux/serial.h>
 #include "wiringPi.h"
+#include "wiringPiSPI.h"
+
+// ヒーター温度
+#define TARGET_TEMP		37.0
+#define	HEX2TEMP(a)	((double)(a)*0.0263-29.061)
+#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+29.061)/0.0263)
+static double	temp=0.0;
+
+// MAX1000との接続SPI０
+#define MAX_SPI_CHANNEL 0
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
 #define L6470_SPI_L6470 1
@@ -92,13 +102,14 @@ struct _cnt_tbl {
 	int n;						// 取り込んだデータ数
 	int	sec;					// カウント取り込み秒数表示
 	int	times;					// カウント取り込み秒数
-	int next_flag;				// 1:継続取り込み中＊1秒毎に240バイトのデータを取り込むデバイスである
+	int owner;					// 指示コンソールNo.
 	int min;					// カウントMin値
 	int max;					// カウントMax値
+	time_t t;					// カウント取込み開始
 	struct timespec tim_start;	// カウント取込み開始
 	char str_start[32];			// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
-	char buf[1000][CNT_SZ];		// 1000秒のデータバッファ
+	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
 } static cnt_tbl={0, 0};
 
 // 動作シーケンス格納テーブル
@@ -120,7 +131,7 @@ struct _action_tbl {
 
 // パルスモーター管理テーブル
 struct _ppm_ctrl {
-	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:home/step
+	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby
 	int	ratio;
 	struct _init_pulse {
 		int	init;
@@ -249,6 +260,15 @@ static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
 	}
 }
 
+// 温度設定
+static void config_temp(double target)
+{
+		unsigned char data[4]={0x29,0x40,0x80,0xc0};
+		data[2] += (unsigned char)(((unsigned short)TEMP2HEX(target))>>6); 
+		data[3] += (unsigned char)(TEMP2HEX(target)&0x3f);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+}
+
 // L6470に1byte送信
 static unsigned char L6470_write(unsigned char ch, unsigned char data)
 {
@@ -369,6 +389,7 @@ static int ppm_init(int ch)
 
 	switch (pctrl->driving) {
 	case 0:		// 0:not use
+	case 5:		// 5:standby
 		pctrl->speed.start=pctrl->init_pulse.init;
 		pctrl->speed.max  =pctrl->init_pulse.init;
 		pctrl->speed.acc  =1;
@@ -436,7 +457,8 @@ static int ppm_init(int ch)
 static long get_1st_data(int i)
 {
 	unsigned long dat=0L;
-	int j, k, l=0;
+	int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
+	int j, k;
 	for (j=0; j<(CNT_SZ-3); ) {
 		if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
 			(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
@@ -471,14 +493,14 @@ static int count_save(char *str)
 	int ret=-1;
 	int i, j, k;
 	FILE *fp;
-	time_t t = time(NULL);
-	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&t));
+	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
 printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 	if (fp) {
 		for (i=0; i<cnt_tbl.n; i++) {
 			unsigned long total=0L;
-			int l=0, m=0;
+			int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
+			int m=0;
 			for (j=0; j<(CNT_SZ-3); ) {
 				if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
 					(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
@@ -512,7 +534,8 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 					}
 				}
 			}
-			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+//			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+			fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?total/m:0L);
 		}
 		fclose(fp);
 		ret=0;
@@ -787,12 +810,15 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
-			cnt_tbl.min      =pact->start_pulse;
-			cnt_tbl.max      =pact->max_pulse;
+			cnt_tbl.owner    =no;
+			cnt_tbl.min      =pact->start_pulse + (pact->max_pulse<<16);
+			cnt_tbl.max      =pact->st_slope + (pact->ed_slope<<16);
+
 			ioctl(fd, TIOCMBIC, &rts);
 			tcflush(fd, TCIFLUSH);
 			ioctl(fd, TIOCMBIS, &rts);
 
+			cnt_tbl.t = t;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
@@ -828,7 +854,7 @@ static int sequence(int sock, int fd, int no)
 
 		ioctl(fd, FIONREAD, &n);
 		if (n>=CNT_SZ) {
-			if (cnt_tbl.n<1000) {
+			if (cnt_tbl.n<2000) {
 				read(fd, cnt_tbl.buf[cnt_tbl.n], CNT_SZ);
 				cnt_tbl.n++;
 			}
@@ -845,6 +871,9 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.sec = sec;
 			sprintf(str, "取込:%lu秒 :%ld", sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
 			message(sock, no, 1, 3, str);
+			// ベース画面への表示	
+			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
+			message(sock, 0, 1, 1, str);
 		}
 	}
 
@@ -877,7 +906,7 @@ static int sequence(int sock, int fd, int no)
 				message(sock, no, 2, 0, str);
 			}
 			// カウント値取得済であればファイルに保存する
-			if (cnt_tbl.n>0) {
+			if (cnt_tbl.owner==no && cnt_tbl.n>0) {
 				char tmp[32];
 				// カウンターSTOP
 				ioctl(fd, TIOCMBIC, &rts);
@@ -886,6 +915,7 @@ static int sequence(int sock, int fd, int no)
 					sprintf(str, "FILE %s", tmp);
 					message(sock, no, 1, 1, str);
 				}
+				cnt_tbl.n=0;
 			}
 		}
 		// Next
@@ -957,9 +987,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	// 動作準備
 	else if (id==0xC014) {
 		int no = (int)((unsigned char)buf[6]);
-		int gpio = (int)((unsigned char)buf[7]);
 		struct _seq_tbl *pseq = &seq_tbl[no-1];
-		int count;
 		if (pseq->run==0) {
 			cnt_tbl.n=0;
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
@@ -971,17 +999,6 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
 			message(sock, no, 1, 3, "");
-			/* GPIO IN/OUT設定 */
-			for (count=0; GPIO_CH[count]; count++);
-			for (i=0; GPIO_CH[i]; i++) {
-				if ((gpio>>(count-i-1))&0x01) {
-					pinMode(GPIO_CH[i], OUTPUT);
-					digitalWrite(GPIO_CH[i], 0);
-				}
-				else{
-					pinMode(GPIO_CH[i], INPUT);
-				}
-			}
 		}
 	}
 	// 動作開始
@@ -1049,10 +1066,24 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 				sprintf(str, "FILE %s", tmp);
 				message(sock, no, 1, 1, str);
 			}
+			cnt_tbl.n=0;
 		}
 	}
 	// スレッド生成
 	else if (id==0xC012) {
+		int gpio = (int)((unsigned char)buf[7]);
+		int count, i;
+		/* GPIO IN/OUT設定 */
+		for (count=0; GPIO_CH[count]; count++);
+		for (i=0; GPIO_CH[i]; i++) {
+			if ((gpio>>(count-i-1))&0x01) {
+				pinMode(GPIO_CH[i], OUTPUT);
+				digitalWrite(GPIO_CH[i], 0);
+			}
+			else{
+				pinMode(GPIO_CH[i], INPUT);
+			}
+		}
 	}
 	// スレッド停止
 	else if (id==0xC013) {
@@ -1065,6 +1096,10 @@ static int execute(int sock, int fd)
 {
 	char buf[512], str[32];
 	int i, len=1;
+	struct timespec tim_last, tim_last2, tim_now;
+
+	clock_gettime(CLOCK_MONOTONIC, &tim_last);
+	tim_last2=tim_last;
 
 	while (len!=0) {
 
@@ -1092,6 +1127,40 @@ static int execute(int sock, int fd)
 			if (seq_tbl[i].run) {
 				sequence(sock, fd, i+1);
 			}
+		}
+
+		// 温度を取り込んで表示
+		clock_gettime(CLOCK_MONOTONIC, &tim_now);
+		if (tim_last.tv_sec<tim_now.tv_sec) {
+        static int flag=0, led_conf=0;
+            flag^=1;
+            // 温度
+            if (flag) {
+    			unsigned char data[4]={0x06,0x40,0x80,0xc0};
+	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+		    	// OK
+			    if (data[0]==1) {
+				    temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+    			}
+	    		// ERR
+		    	else if (data[0]==0x20) {
+			    	unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
+				    wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
+                }
+			}
+            // LED設定値
+            else{
+    			unsigned char data[4]={0x05,0x40,0x80,0xc0};
+	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+                led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
+            }
+			// 5秒ごとに表示
+			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
+				sprintf(str, "%03X %.2f℃", led_conf, temp);
+				message(sock, 0, 1, 1, str);
+				tim_last2=tim_now;
+			}
+			tim_last=tim_now;
 		}
 	}
 	return 0;
@@ -1183,6 +1252,14 @@ int main(void)
 
 	// カウンターSTOP
 	ioctl(fd, TIOCMBIC, &rts);
+
+	/* SPI channel 0 を 1MHz で開始 */
+	if (wiringPiSPISetupMode(MAX_SPI_CHANNEL, 1000000, 3) < 0) {
+		perror("SPI Setup failed:\n");
+		exit(EXIT_FAILURE);
+	}
+	// 温度設定
+	config_temp(TARGET_TEMP);
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");

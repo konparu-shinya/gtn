@@ -2,7 +2,7 @@
 
 require 'gtk2'
 #require 'kconv'
-#require 'FileUtils'
+require 'fileutils'
 require 'socket'
 require 'gmail'
 
@@ -44,6 +44,9 @@ TimeOut = 3000
 CommentTitle = 'コメント(先頭に#を付けると実行しません)'
 IFCmt = 'if (RegA & Mask) == Value then goto'
 UNCmt = 'if (RegA & Mask) != Value then goto'
+
+CancelSt = '=無効開始'
+CancelEd = '=無効終了'
 
 ADDevFile = '/dev/adm686z'
 
@@ -208,7 +211,7 @@ end
 def dcmotor_reg_init
 
   return  if !File.exist?( $main_form.file_dcm )
-  print "dcmotor_reg_init:#{$main_form.file_dcm}¥n"
+  p "dcmotor_reg_init:#{$main_form.file_dcm}¥r"
 
   open( $main_form.file_dcm, "r" ) do |file|
     while line = file.gets
@@ -237,7 +240,7 @@ end
 def motor_reg_init
 
   return  if !File.exist?( $main_form.file_ppm )
-  print "motor_reg_init:#{$main_form.file_ppm}¥n"
+  p "motor_reg_init:#{$main_form.file_ppm}¥r"
 
   open( $main_form.file_ppm, "r" ) do |file|
     while line = file.gets
@@ -314,7 +317,11 @@ def action_info_send(console_no, ary)
   when "EVENT"
     cmd[8] = $act_hash_evt.key(ary[5]) if $act_hash_evt.key(ary[5])
   when "MEAS"
-    cmd[8] = $act_hash_adc.key(ary[5]) if $act_hash_adc.key(ary[5])
+    cmd[ 8] = $act_hash_adc.key(ary[5]) if $act_hash_adc.key(ary[5])
+    cmd[10] = ary[7].to_i      # 自起動(min 32bit)
+    cmd[11] = ary[7].to_i>>16  # 自起動(min 32bit)
+    cmd[12] = ary[8].to_i      # 最高速(max 32bit)
+    cmd[13] = ary[8].to_i>>16  # 最高速(max 32bit)
   end
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
@@ -322,6 +329,10 @@ end
 # GPIO情報の取得
 def gpio_info
   ret = 0
+
+  # ファイルが無ければすべてINポート
+  return ret unless File.exist?( $main_form.file_gpio )
+
   open( $main_form.file_gpio, "r" ) do |f|
     while line = f.gets
       ret = (ret << 1 ) + ((line == "IN\n") ? 0:1)
@@ -339,9 +350,9 @@ class StartMessage
     @dialog.window_position = Gtk::Window::POS_CENTER
     @dialog.set_default_size 400, 80
     @dialog.modify_bg(Gtk::STATE_NORMAL, Gdk::Color.parse("#fffcc4"))
-	@dialog.add_button(Gtk::Stock::CLOSE, Gtk::Dialog::RESPONSE_CLOSE)
-	
-	label = Gtk::Label.new("A&T OPEN インターネットに接続してください");
+    @dialog.add_button(Gtk::Stock::CLOSE, Gtk::Dialog::RESPONSE_CLOSE)
+    
+    label = Gtk::Label.new("A&T OPEN インターネットに接続してください");
     label.show_all
     @dialog.vbox.add( label )
     # ダイアログを表示して戻りを処理する
@@ -427,8 +438,8 @@ class SelProject
       # 画面更新
       $main_form.show
 
-      # Tnet I/O設定
-#     set_tnet
+      # スレッド通知
+      $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC012, $main_form.prj_no, gpio_info(), 0x00, ETX], 'C4nC4' ) if $sock_port.open_err == nil
       # モータレジスタの初期化
       motor_reg_init
       dcmotor_reg_init
@@ -571,6 +582,7 @@ class ActCopy
       end
 
       if "#{lblSts.text}".size < 1
+p [__LINE__, fcp_name, tcp_name]
         # コピー
         FileUtils.cp( fcp_name, tcp_name )
 
@@ -1181,10 +1193,17 @@ class Gpio
       @box.push ary
     end
 
-    open( $main_form.file_gpio, "r" ) do |f|
-      @box.each do |ary|
-        ary[2].active = true if f.gets == "IN\n"
+    if File.exist?( $main_form.file_gpio )
+      open( $main_form.file_gpio, "r" ) do |f|
+        @box.each do |ary|
+          ary[2].active = true if f.gets == "IN\n"
+        end
       end
+    # ファイルが無ければすべてINポート
+    else
+        @box.each do |ary|
+          ary[2].active = true
+        end
     end
 
     table = Gtk::Table.new( 2, 3, false )
@@ -1613,6 +1632,11 @@ class Input
     @edtErBitNo     = Gtk::Entry.new()
     btnErWrite      = Gtk::Button.new( '書込み' )
 
+    # Edit コメント new
+    @edtComComment  = Gtk::Entry.new()
+    @cmbComAction   = Gtk::Combo.new()
+    btnComWrite     = Gtk::Button.new( '書込み' )
+
     # Edit Wait 配置
     table4_41 = Gtk::Table.new( 3, 4, false )
     table4_41.attach( Gtk::Label.new( CommentTitle ), 0, 3, 0, 1 )
@@ -1669,6 +1693,14 @@ class Input
     table4_45.attach( @edtErBitNo,                           5, 6, 1, 2 )
     table4_45.attach( btnErWrite,                            0, 6, 3, 4 )
 
+    # Edit コメント 配置
+    table4_46 = Gtk::Table.new( 3, 4, false )
+    table4_46.attach( Gtk::Label.new( CommentTitle ),        0, 4, 0, 1 )
+    table4_46.attach( Gtk::Label.new( "Action" ),            4, 6, 0, 1 )
+    table4_46.attach( @edtComComment,                        0, 4, 1, 2 )
+    table4_46.attach( @cmbComAction,                         4, 6, 1, 2 )
+    table4_46.attach( btnComWrite,                           0, 6, 3, 4 )
+
     # Edit 命令文 配置
     @nbook4_4 = Gtk::Notebook.new()
     @nbook4_4.append_page( table4_41,  Gtk::Label.new( ' Wait ' ) )
@@ -1676,6 +1708,7 @@ class Input
     @nbook4_4.append_page( table4_43,  Gtk::Label.new( ' if not ' ) )
     @nbook4_4.append_page( table4_44,  Gtk::Label.new( ' goto ' ) )
     @nbook4_4.append_page( table4_45,  Gtk::Label.new( ' error ' ) )
+    @nbook4_4.append_page( table4_46,  Gtk::Label.new( ' コメント行 ' ) )
 
     # Edit SIO new
     @edtSComment  = Gtk::Entry.new()
@@ -1802,6 +1835,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     btnUWrite.signal_connect( 'clicked' ){ unless_write_clicked }
     btnGWrite.signal_connect( 'clicked' ){ goto_write_clicked }
     btnErWrite.signal_connect( 'clicked' ){ error_write_clicked }
+    btnComWrite.signal_connect( 'clicked' ){ comment_write_clicked }
     btnEWrite.signal_connect( 'clicked' ){ event_write_clicked }
     btnMWrite.signal_connect( 'clicked' ){ meas_write_clicked }
     btnGo.signal_connect( 'clicked' ){ go_clicked }
@@ -1817,6 +1851,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @cmbDAction.set_popdown_strings( $act_hash_dio.values )
     @cmbEAction.set_popdown_strings( $act_hash_evt.values )
     @cmbMAction.set_popdown_strings( $act_hash_adc.values )
+    @cmbComAction.set_popdown_strings( [CancelSt, CancelEd] )
 
     # コラムリストに表示
     fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
@@ -1872,6 +1907,14 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       end
     end
 
+    # START/STOP行はactionファイルの開始行と終了行を表示する
+    fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
+    if File.exist?( fname )
+      ary = IO.readlines(fname)
+      $main_form.start[ @my_console_no-1 ].set_value( ary[0].chop.split( /,/ )[0].to_i ) if ary[0]
+      $main_form.stop[ @my_console_no-1 ].set_value( ary[-1].chop.split( /,/ )[0].to_i ) if ary[-1]
+    end
+
     # main formへ終了通知
     $main_form.console_opened[ @my_console_no ] = nil
   end
@@ -1888,6 +1931,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @edtUComment.set_text( iter.get_value(1) )
     @edtGComment.set_text( iter.get_value(1) )
     @edtErComment.set_text( iter.get_value(1) )
+    @edtComComment.set_text( iter.get_value(1) )
     @edtEComment.set_text( iter.get_value(1) )
     @edtMComment.set_text( iter.get_value(1) )
 
@@ -1949,6 +1993,10 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @spnBtnErPort.set_value( ary[1].to_i )
       @edtErBitNo.set_text( iter.get_value(5) )
       @nbook4_4.set_page( 4 )
+    when "COMMENT"
+      @nbook.set_page( 3 )
+      @cmbComAction.entry.set_text( iter.get_value(4) )
+      @nbook4_4.set_page( 5 )
     when "SIO"
       @spnBtnSCh.set_value( iter.get_value(3).to_i )
       @cbCr.active = ( iter.get_value(4) == 'SIO ADD CR' ) ? true : false
@@ -2220,6 +2268,22 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @clist_change = true
   end
 
+  # コメント書込み
+  def comment_write_clicked
+    fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
+            "#{@edtComComment.text}", 
+            'COMMENT',
+            '',
+            '',
+            "#{@cmbComAction.entry.text}", 
+            "-", "-", "-", "-", "-", "-", "-", "-", "-" ]
+    clist_write( fmt )
+    # ステータスクリア
+    clear_status
+
+    @clist_change = true
+  end
+
   # EVENT書込み
   def event_write_clicked
     fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
@@ -2265,8 +2329,8 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     if cur_ary[0]
       execute( cur_ary[0], cur_ary[-1], 0 )
       # main formへline通知
-      $main_form.start[ @my_console_no-1 ].set_value( cur_ary[0] )
-      $main_form.stop[ @my_console_no-1 ].set_value( cur_ary[-1] )
+      #$main_form.start[ @my_console_no-1 ].set_value( cur_ary[0] )
+      #$main_form.stop[ @my_console_no-1 ].set_value( cur_ary[-1] )
     else
       @lblStatus[0].set_text( "実行範囲が選ばれていません" )
       # 赤文字
@@ -2438,12 +2502,18 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
       if File.exist?( fname )
         open( fname, "r" ) do |f|
+          cancel = nil
           while line = f.gets
             ary = (line.chop).split( /,/ )
+
+            cancel = true if ary[5] == CancelSt
+            cancel = nil  if ary[5] == CancelEd
 
             next if ary[0].to_i < start_line
             next if ary[0].to_i > stop_line
             next if (ary[1])[ 0, 1 ] == "#"
+            next if ary[5] == CancelEd
+            next if cancel
 
             action_info_send(@my_console_no, ary)
           end
@@ -2520,7 +2590,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
+  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
 
   def initialize( size )
 #    @prj_no = 1
@@ -2620,13 +2690,15 @@ class Gtn
     btnStart    = Gtk::Button.new( 'START' )
     btnStop     = Gtk::Button.new( 'EMG STOP' )
     btnClose    = Gtk::Button.new( '終了' )
-    @main_sts = Gtk::Label.new( "" )
+    @main_sts   = Gtk::Label.new( "" )
+    @main_info  = Gtk::Label.new( "" )
 
     group3 = Gtk::Table.new( 2, 2, false )
     group3.attach( @main_sts,                0,  3, 0, 1 )
-    group3.attach( btnStart,                 0,  1, 1, 2 )
-    group3.attach( btnStop,                  1,  2, 1, 2 )
-    group3.attach( btnClose,                 2,  3, 1, 2 )
+    group3.attach( @main_info,               0,  3, 1, 2 )
+    group3.attach( btnStart,                 0,  1, 2, 3 )
+    group3.attach( btnStop,                  1,  2, 2, 3 )
+    group3.attach( btnClose,                 2,  3, 2, 3 )
 
     # 全体
     table = Gtk::Table.new( 2, 62, false )
@@ -2785,12 +2857,18 @@ class Gtn
         fname = $main_form.file_action + "#{i}" + Kakuchou_si
         if File.exist?( fname )
           open( fname, "r" ) do |f|
+            cancel = nil
             while line = f.gets
               ary = (line.chop).split( /,/ )
 
+              cancel = true if ary[5] == CancelSt
+              cancel = nil  if ary[5] == CancelEd
+
               next if ary[0].to_i < @start[ i-1 ].value_as_int
               next if ary[0].to_i > @stop[ i-1 ].value_as_int
+              next if ary[5] == CancelEd
               next if (ary[1])[ 0, 1 ] == "#"
+              next if cancel
 
               action_info_send(i, ary)
             end
@@ -2818,10 +2896,6 @@ class Gtn
     return if $main_form.file_config == nil
 
     $sock_port.nt_send( [STX, 0x07, 0x00, 0x00, 0xC016, 0, 0x00, ETX], 'C4nC3' ) if $sock_port.open_err == nil
-
-    # モータレジスタの初期化
-    motor_reg_init
-    dcmotor_reg_init
   end
 
   # configファイルに書き出す
@@ -2846,6 +2920,7 @@ class Gtn
 
   # 表示
   def show
+    # configファイルから呼び出して表示する
     if File.exist?( $main_form.file_config )
       open( $main_form.file_config, 'r' ) do |f|
         while line = f.gets
@@ -2853,8 +2928,8 @@ class Gtn
           i   = ary[0].to_i
           if i <= @size && ary.size == 8
             @name[ i-1 ].set_text( ary[1] )
-            @start[ i-1 ].set_value( ary[2].to_i )
-            @stop[ i-1 ].set_value( ary[3].to_i )
+           #@start[ i-1 ].set_value( ary[2].to_i )
+           #@stop[ i-1 ].set_value( ary[3].to_i )
             @loop[ i-1 ].set_value( ary[4].to_i )
             @delay_no[ i-1 ].set_value( ary[5].to_i )
             @delay_time[ i-1 ].set_value( ary[6].to_i )
@@ -2865,12 +2940,24 @@ class Gtn
     else
       ( 1..@size ).each do |i|
         @name[ i-1 ].set_text( '' )
-        @start[ i-1 ].set_value( 1 )
-        @stop[ i-1 ].set_value( 1 )
+       #@start[ i-1 ].set_value( 1 )
+       #@stop[ i-1 ].set_value( 1 )
         @loop[ i-1 ].set_value( 1 )
         @delay_no[ i-1 ].set_value( 0 )
         @delay_time[ i-1 ].set_value( 0 )
         @delay_sec[ i-1 ].set_value( 0 )
+      end
+    end
+    # START/STOP行はactionファイルの開始行と終了行を表示する
+    (1..@size).each do |i|
+      fname = $main_form.file_action + "#{i}" + Kakuchou_si
+      if File.exist?( fname )
+        ary = IO.readlines(fname)
+        @start[ i-1 ].set_value( ary[0].chop.split( /,/ )[0].to_i ) if ary[0]
+        @stop[ i-1 ].set_value( ary[-1].chop.split( /,/ )[0].to_i ) if ary[-1]
+      else
+        @start[ i-1 ].set_value( 1 )
+        @stop[ i-1 ].set_value( 1 )
       end
     end
   end
@@ -2900,10 +2987,10 @@ end
 # 通信オブジェクト生成
 $sock_port = MySocket.new
 
-StartMessage.new
+#StartMessage.new
 
 # MAIN画面表示
-$main_form = Gtn.new( 20 )
+$main_form = Gtn.new( 19 )
 
 if File.exist?( PrjNames )
   SelProject.new 
@@ -2915,6 +3002,11 @@ end
 Gtk.timeout_add( 200 ) do
   $sock_port.nt_recv_each do |rcv_msg|
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
+
+    # ベース画面のステータス表示
+    if my_no == 0 && msg
+      $main_form.main_info.set_text( msg )
+    end
 
     # ベース画面の各状態をstopに
     if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
@@ -2953,22 +3045,6 @@ Gtk.timeout_add( 200 ) do
             end
           end
         end
-      # A/D取り込みファイル
-      elsif line == 1 && msg =~ /FILE/ && MailTo
-        file = msg.split(/\s/)[-1]
-        name = msg.split(/\//)[-1]
-        # gmail送信
-        gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
-        gmail.deliver do
-          to MailTo
-          subject "測定レポート:#{name}"
-          #text_part do
-          #  body "本文"
-          #end
-          add_file file
-        end
-        gmail.logout
-        File.unlink file
       # その他は黒文字
       else
         style = Gtk::Style.new
@@ -3003,6 +3079,26 @@ Gtk.timeout_add( 200 ) do
           $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)
         end
       end while iter.next!
+    end
+
+    # A/D取り込みファイルのgmail送信
+    if line == 1 && msg && MailTo
+      if msg =~ /FILE/
+        file = msg.split(/\s/)[-1]
+        name = msg.split(/\//)[-1]
+        # gmail送信
+        gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
+        gmail.deliver do
+          to MailTo
+          subject "測定レポート:#{name}"
+          #text_part do
+          #  body "本文"
+          #end
+          add_file file
+        end
+        gmail.logout
+        File.unlink file
+      end
     end
   end
   true
