@@ -2657,6 +2657,9 @@ class Gtn
 
   # 終了処理
   def exit_seq
+    # 全Actionが停止であることを確認する
+    return unless $main_form.status.map { |x| x.text }.uniq == ['stop']
+
     # Actionモジュール停止
 #   $sock_port.nt_send( [STX, 0x06, 0x00, 0x00, 0xC013, 0x00, ETX], 'C4nC2' ) if $sock_port.open_err == nil
 
