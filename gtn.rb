@@ -2506,12 +2506,12 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
           while line = f.gets
             ary = (line.chop).split( /,/ )
 
-            cancel = true if ary[5] == CancelSt
-            cancel = nil  if ary[5] == CancelEd
-
             next if ary[0].to_i < start_line
             next if ary[0].to_i > stop_line
             next if (ary[1])[ 0, 1 ] == "#"
+
+            cancel = true if ary[5] == CancelSt
+            cancel = nil  if ary[5] == CancelEd
             next if ary[5] == CancelEd
             next if cancel
 
@@ -2861,13 +2861,13 @@ class Gtn
             while line = f.gets
               ary = (line.chop).split( /,/ )
 
-              cancel = true if ary[5] == CancelSt
-              cancel = nil  if ary[5] == CancelEd
-
               next if ary[0].to_i < @start[ i-1 ].value_as_int
               next if ary[0].to_i > @stop[ i-1 ].value_as_int
-              next if ary[5] == CancelEd
               next if (ary[1])[ 0, 1 ] == "#"
+
+              cancel = true if ary[5] == CancelSt
+              cancel = nil  if ary[5] == CancelEd
+              next if ary[5] == CancelEd
               next if cancel
 
               action_info_send(i, ary)
