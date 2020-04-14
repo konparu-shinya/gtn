@@ -537,13 +537,13 @@ class Gtn
             while line = f.gets
               ary = (line.chop).split( /,/ )
 
-              cancel = true if ary[5] == CancelSt
-              cancel = nil  if ary[5] == CancelEd
-
               next if ary[0].to_i < @start[ i-1 ].value_as_int
               next if ary[0].to_i > @stop[ i-1 ].value_as_int
-              next if ary[5] == CancelEd
               next if (ary[1])[ 0, 1 ] == "#"
+
+              cancel = true if ary[5] == CancelSt
+              cancel = nil  if ary[5] == CancelEd
+              next if ary[5] == CancelEd
               next if cancel
 
               action_info_send(i, ary)
@@ -617,7 +617,7 @@ class Gtn
           ary = line.chop.split(/=/)
           case ary[0]
           when 'ana_no'
-            @enSerial.set_text( ary[1] )
+            @enSerial.set_text( ary[1] ) if ary[1]
           end
         end
       end
@@ -641,9 +641,25 @@ class Gtn
   end
 
   def exit_seq
-    open($main_form.file_ana, 'w') do |f|
-      f << "ana_no=#{@enSerial.text}\n"
+    set1_flag = nil
+    file = []
+    file = IO.readlines($main_form.file_ana) if File.exist?( $main_form.file_ana )
+
+    fw = open( $main_form.file_ana, 'w' )
+    file.each do |line|
+      ary = line.chop.split(/=/)
+      case ary[0]
+      when 'ana_no'
+        fw << "ana_no=#{@enSerial.text}\n"
+        set1_flag = true
+      else
+        fw << line
+      end
     end
+
+    fw << "ana_no=#{@enSerial.text}\n" if set1_flag == nil
+    fw.close
+
     Gtk::main_quit
   end
 end
