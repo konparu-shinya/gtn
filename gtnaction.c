@@ -33,9 +33,11 @@
 #include "wiringPiSPI.h"
 
 // ヒーター温度
-#define TARGET_TEMP		37.0
-#define	HEX2TEMP(a)	((double)(a)*0.0263-29.061)
-#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+29.061)/0.0263)
+#define TARGET_TEMP		40.0
+//#define	HEX2TEMP(a)	((double)(a)*0.0263-29.061)
+#define	HEX2TEMP(a)	((double)(a)*0.0256-28.084)
+//#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+29.061)/0.0263)
+#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+28.084)/0.0256)
 static double	temp=0.0;
 
 // MAX1000との接続SPI０

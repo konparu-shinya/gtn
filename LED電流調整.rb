@@ -15,6 +15,14 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
 File_ana = "#{Prjs[1]}/免疫ドライシステム#{Kakuchou_si}"
 
+def hex2temp(a)
+  return a*0.0256-28.084
+end
+
+def temp2hex(a)
+  return ((a+28.084)/0.0256).floor(0)
+end
+
 class Window
   attr_accessor :spi, :lblLVal, :lblLA, :lblTVal
 
@@ -152,11 +160,13 @@ w = Window.new
 Gtk.timeout_add( 1000 ) do
   # 温度制御SV
   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
-  p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+# p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+
 #=begin
   # 温度
   ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
-  w.lblTVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
+  w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
+#p [__LINE__, "#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}"] if ary[0]==1
   # LED制御SV
   ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
   w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
