@@ -8,7 +8,7 @@
  *                                GPIO2(pin3) GPIO3(pin5) GPIO4(pin7) GPIO5(pin29) GPIO6(pin31) GPIO13(pin33)
  *  A/D
  *                                USB-RS232C
- *  gcc -o gtnaction gtnaction.c -lwiringPi
+ *  gcc -o gtnaction gtnaction.c -lwiringPi -lpthread
  ********************************************************************************/
 #include <stdio.h>
 #include <stdint.h>
@@ -21,11 +21,13 @@
 #include <math.h>
 #include <time.h>
 #include <termios.h>
+#include <pthread.h>
 #include <net/if.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/shm.h>
 #include <linux/serial.h>
 #include "wiringPi.h"
 #include "wiringPiSPI.h"
@@ -38,6 +40,7 @@ static double	temp=0.0;
 
 // MAX1000との接続SPI０
 #define MAX_SPI_CHANNEL 0
+static pthread_mutex_t *mutex;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
 #define L6470_SPI_L6470 1
@@ -266,7 +269,9 @@ static void config_temp(double target)
 		unsigned char data[4]={0x29,0x40,0x80,0xc0};
 		data[2] += (unsigned char)(((unsigned short)TEMP2HEX(target))>>6); 
 		data[3] += (unsigned char)(TEMP2HEX(target)&0x3f);
+		pthread_mutex_lock(mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+		pthread_mutex_unlock(mutex);
 }
 
 // L6470に1byte送信
@@ -1133,6 +1138,7 @@ static int execute(int sock, int fd)
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if (tim_last.tv_sec<tim_now.tv_sec) {
         static int flag=0, led_conf=0;
+			pthread_mutex_lock(mutex);
             flag^=1;
             // 温度
             if (flag) {
@@ -1154,6 +1160,7 @@ static int execute(int sock, int fd)
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
                 led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
             }
+			pthread_mutex_unlock(mutex);
 			// 5秒ごとに表示
 			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
 				sprintf(str, "%03X %.2f℃", led_conf, temp);
@@ -1239,6 +1246,46 @@ static int open_ttyS( char *devname, int speed, int bits, int par, int stop )
 	return pf;
 }
 
+static int mutex_init(void)
+{
+	pthread_mutexattr_t mat;
+	int shmid;
+	/* mutex用に共有メモリを利用 */
+	const key_t key = 112;
+	shmid = shmget(key, sizeof(pthread_mutex_t), 0600);
+	/* 初回 */
+	if (shmid < 0) {
+		shmid = shmget(key, sizeof(pthread_mutex_t), 0600|IPC_CREAT);
+		if (shmid < 0) {
+			return -1;
+		}
+		mutex = shmat(shmid, NULL, 0);
+		if ((intptr_t)mutex == -1) {
+			return -1;
+		}
+
+		/* mutexのattributeを設定する準備 */
+		pthread_mutexattr_init(&mat);
+
+		/* mutexをプロセス間で利用する設定を行う */
+		/* これを行わないとプロセス内でのみ有効のmutexになります */
+		if (pthread_mutexattr_setpshared(&mat, PTHREAD_PROCESS_SHARED) != 0) {
+			return -1;
+		}
+
+		pthread_mutex_init(mutex, &mat);
+
+	}
+	/* 既に起動済 */
+	else{
+		mutex = shmat(shmid, NULL, 0);
+		if ((intptr_t)mutex == -1) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int fd = open_ttyS( "/dev/ttyUSB0", 9600, 8, 2, 1);		// フォトンカウント
@@ -1253,13 +1300,17 @@ int main(void)
 	// カウンターSTOP
 	ioctl(fd, TIOCMBIC, &rts);
 
+	mutex_init();
+
+	pthread_mutex_lock(mutex);
 	/* SPI channel 0 を 1MHz で開始 */
 	if (wiringPiSPISetupMode(MAX_SPI_CHANNEL, 1000000, 3) < 0) {
 		perror("SPI Setup failed:\n");
 		exit(EXIT_FAILURE);
 	}
+	pthread_mutex_unlock(mutex);
 	// 温度設定
-	config_temp(TARGET_TEMP);
+//	config_temp(TARGET_TEMP);
 
 	if (wiringPiSetupGpio()==-1) {
 		perror("GPIO Setup failed:\n");
