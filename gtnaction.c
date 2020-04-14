@@ -839,6 +839,27 @@ static int sequence(int sock, int fd, int no)
 			pseq->current++;
 		}
 		break;
+	case 0x81:		// 音声1
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound1.mp3");
+			exit(0);
+		}
+		pseq->current++;
+		break;
+	case 0x82:		// 音声2
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound2.mp3");
+			exit(0);
+		}
+		pseq->current++;
+		break;
+	case 0x83:		// 音声3
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound3.mp3");
+			exit(0);
+		}
+		pseq->current++;
+		break;
 	default:
 		pseq->current++;
 		break;

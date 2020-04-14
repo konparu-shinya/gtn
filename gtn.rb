@@ -112,6 +112,12 @@ $act_hash_adc = {
   0x72 => 'カウント取込終了待ち'
 }
 
+$act_hash_mp3 = {
+  0x81 => '音声1',
+  0x82 => '音声2',
+  0x83 => '音声3'
+}
+
 def b2d( str )
   h = 0
   ( 1..str.size ).each do |i|
@@ -322,6 +328,8 @@ def action_info_send(console_no, ary)
     cmd[11] = ary[7].to_i>>16  # 自起動(min 32bit)
     cmd[12] = ary[8].to_i      # 最高速(max 32bit)
     cmd[13] = ary[8].to_i>>16  # 最高速(max 32bit)
+  when "MP3"
+    cmd[8] = $act_hash_mp3.key(ary[5]) if $act_hash_mp3.key(ary[5])
   end
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
@@ -1637,6 +1645,11 @@ class Input
     @cmbComAction   = Gtk::Combo.new()
     btnComWrite     = Gtk::Button.new( '書込み' )
 
+    # Edit 音声 new
+    @edtMP3Comment  = Gtk::Entry.new()
+    @cmbMP3Action   = Gtk::Combo.new()
+    btnMP3Write     = Gtk::Button.new( '書込み' )
+
     # Edit Wait 配置
     table4_41 = Gtk::Table.new( 3, 4, false )
     table4_41.attach( Gtk::Label.new( CommentTitle ), 0, 3, 0, 1 )
@@ -1701,6 +1714,14 @@ class Input
     table4_46.attach( @cmbComAction,                         4, 6, 1, 2 )
     table4_46.attach( btnComWrite,                           0, 6, 3, 4 )
 
+    # Edit 音声 配置
+    table4_47 = Gtk::Table.new( 3, 4, false )
+    table4_47.attach( Gtk::Label.new( CommentTitle ),        0, 4, 0, 1 )
+    table4_47.attach( Gtk::Label.new( "音声ファイル名" ),    4, 6, 0, 1 )
+    table4_47.attach( @edtMP3Comment,                        0, 4, 1, 2 )
+    table4_47.attach( @cmbMP3Action,                         4, 6, 1, 2 )
+    table4_47.attach( btnMP3Write,                           0, 6, 3, 4 )
+
     # Edit 命令文 配置
     @nbook4_4 = Gtk::Notebook.new()
     @nbook4_4.append_page( table4_41,  Gtk::Label.new( ' Wait ' ) )
@@ -1709,6 +1730,7 @@ class Input
     @nbook4_4.append_page( table4_44,  Gtk::Label.new( ' goto ' ) )
     @nbook4_4.append_page( table4_45,  Gtk::Label.new( ' error ' ) )
     @nbook4_4.append_page( table4_46,  Gtk::Label.new( ' コメント行 ' ) )
+    @nbook4_4.append_page( table4_47,  Gtk::Label.new( ' 音声 ' ) )
 
     # Edit SIO new
     @edtSComment  = Gtk::Entry.new()
@@ -1836,6 +1858,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     btnGWrite.signal_connect( 'clicked' ){ goto_write_clicked }
     btnErWrite.signal_connect( 'clicked' ){ error_write_clicked }
     btnComWrite.signal_connect( 'clicked' ){ comment_write_clicked }
+    btnMP3Write.signal_connect( 'clicked' ){ mp3_write_clicked }
     btnEWrite.signal_connect( 'clicked' ){ event_write_clicked }
     btnMWrite.signal_connect( 'clicked' ){ meas_write_clicked }
     btnGo.signal_connect( 'clicked' ){ go_clicked }
@@ -1852,6 +1875,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @cmbEAction.set_popdown_strings( $act_hash_evt.values )
     @cmbMAction.set_popdown_strings( $act_hash_adc.values )
     @cmbComAction.set_popdown_strings( [CancelSt, CancelEd] )
+    @cmbMP3Action.set_popdown_strings( $act_hash_mp3.values )
 
     # コラムリストに表示
     fname = $main_form.file_action + "#{@my_console_no}" + Kakuchou_si
@@ -1932,6 +1956,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @edtGComment.set_text( iter.get_value(1) )
     @edtErComment.set_text( iter.get_value(1) )
     @edtComComment.set_text( iter.get_value(1) )
+    @edtMP3Comment.set_text( iter.get_value(1) )
     @edtEComment.set_text( iter.get_value(1) )
     @edtMComment.set_text( iter.get_value(1) )
 
@@ -1997,6 +2022,10 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @nbook.set_page( 3 )
       @cmbComAction.entry.set_text( iter.get_value(4) )
       @nbook4_4.set_page( 5 )
+    when "MP3"
+      @nbook.set_page( 3 )
+      @cmbMP3Action.entry.set_text( iter.get_value(4) )
+      @nbook4_4.set_page( 6 )
     when "SIO"
       @spnBtnSCh.set_value( iter.get_value(3).to_i )
       @cbCr.active = ( iter.get_value(4) == 'SIO ADD CR' ) ? true : false
@@ -2276,6 +2305,22 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
             '',
             '',
             "#{@cmbComAction.entry.text}", 
+            "-", "-", "-", "-", "-", "-", "-", "-", "-" ]
+    clist_write( fmt )
+    # ステータスクリア
+    clear_status
+
+    @clist_change = true
+  end
+
+  # 音声書込み
+  def mp3_write_clicked
+    fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
+            "#{@edtMP3Comment.text}", 
+            'MP3',
+            '',
+            '',
+            "#{@cmbMP3Action.entry.text}", 
             "-", "-", "-", "-", "-", "-", "-", "-", "-" ]
     clist_write( fmt )
     # ステータスクリア
