@@ -16,11 +16,11 @@ Prjs = [ "#{BasePrm}",
 File_ana = "#{Prjs[1]}/免疫ドライシステム#{Kakuchou_si}"
 
 def hex2temp(a)
-  return a*0.0256-28.084
+  return (a*0.0256-28.084).round(2)
 end
 
 def temp2hex(a)
-  return ((a+28.084)/0.0256).floor(0)
+  return ((a+28.084)/0.0256).to_i
 end
 
 class Window
@@ -44,7 +44,7 @@ class Window
     lblDo    = Gtk::Label.new("℃");
     @lblTVal = Gtk::Label.new("-");
     @scrl    = Gtk::HScrollbar.new
-    @scrl.set_range(1,0xfff)
+    @scrl.set_range(0,0xfff)
     @scrl.set_value(2000)
     @entLED = Gtk::Entry.new
     @entLED.set_max_length(4)
@@ -122,6 +122,7 @@ p [__LINE__, @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   def set_temp_value
     value = @entTMP.text.to_i
     @entTMP.set_text("#{value}")
+    value = temp2hex(value)
 #p [__LINE__, "%02X %02X" % [0x80|((@scrl.value.floor>>6)&0x3f), 0xc0|(@scrl.value.floor&0x3f)]]
 p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
@@ -162,7 +163,6 @@ Gtk.timeout_add( 1000 ) do
   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
 # p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
 
-#=begin
   # 温度
   ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
   w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
@@ -174,8 +174,7 @@ Gtk.timeout_add( 1000 ) do
   ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
   w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
   # errorの場合はリセットコマンドを発行する
-  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0]==0x20
-#=end
+# w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
 end
 
 Gtk.main()
