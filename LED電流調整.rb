@@ -158,15 +158,17 @@ end
 
 w = Window.new
 
-Gtk.timeout_add( 1000 ) do
+$count = 0
+Gtk.timeout_add( 3000 ) do
+  $count += 1
+p [__LINE__, $count]
   # 温度制御SV
-  ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
+# ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
 # p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
 
   # 温度
   ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
   w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
-#p [__LINE__, "#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}"] if ary[0]==1
   # LED制御SV
   ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
   w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
@@ -174,7 +176,8 @@ Gtk.timeout_add( 1000 ) do
   ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
   w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
   # errorの場合はリセットコマンドを発行する
-# w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+  sleep 0.01
 end
 
 Gtk.main()
