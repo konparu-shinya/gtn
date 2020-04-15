@@ -24,11 +24,13 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal
+  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblTime, :time_st
 
   def initialize
     @spi = WiringPiSpi.new
     @spi.setup_mode(1000000, 3)
+
+    @time_st = Time.now
 
     win = Gtk::Window.new()
     win.title= "LED電流調整"
@@ -54,6 +56,8 @@ class Window
     @entTMP.set_text("40")
     @entTMP.set_max_length(2)
     @entTMP.set_xalign(1)
+    @cbOnOff = Gtk::CheckButton.new('LED ON')
+    @lblTime = Gtk::Label.new("-");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -70,7 +74,7 @@ class Window
       end
     end
 
-    set_led_value
+    set_led_value(false)
     set_temp_value
 
     @entTMP.signal_connect('changed') do 
@@ -83,7 +87,7 @@ class Window
     end
 
     @scrl.signal_connect('value-changed') do 
-      set_led_value
+      set_led_value(@cbOnOff.active?)
     end
 
     lbtn.signal_connect('clicked') do 
@@ -92,6 +96,10 @@ class Window
 
     rbtn.signal_connect('clicked') do 
       @scrl.set_value(@scrl.value+1)
+    end
+
+    @cbOnOff.signal_connect('clicked') do 
+      set_led_value(@cbOnOff.active?)
     end
 
     tbl = Gtk::Table.new(2,3,true)
@@ -103,6 +111,8 @@ class Window
     tbl.attach_defaults(lbtn,     0, 1, 1, 2)
     tbl.attach_defaults(@scrl,    1, 7, 1, 2)
     tbl.attach_defaults(rbtn,     7, 8, 1, 2)
+    tbl.attach_defaults(@cbOnOff, 2, 4, 2, 3)
+    tbl.attach_defaults(@lblTime, 4, 7, 2, 3)
     tbl.attach_defaults(lblTMP,   0, 2, 3, 4)
     tbl.attach_defaults(@entTMP,  2, 5, 3, 4)
     tbl.attach_defaults(lblDo,    5, 6, 3, 4)
@@ -112,9 +122,14 @@ class Window
 
   end
 
-  def set_led_value
+  def set_led_value(active)
+    @time_st = Time.now
+
     value = @scrl.value.floor
     @entLED.set_text("#{value}")
+
+    # LED OFFの場合は0にする
+    value = 0 if active == false
 #p [__LINE__, "%02X %02X" % [0x80|((@scrl.value.floor>>6)&0x3f), 0xc0|(@scrl.value.floor&0x3f)]]
 p [__LINE__, @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
@@ -159,25 +174,37 @@ end
 w = Window.new
 
 $count = 0
-Gtk.timeout_add( 3000 ) do
+Gtk.timeout_add( 1000 ) do
   $count += 1
 p [__LINE__, $count]
-  # 温度制御SV
-# ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
-# p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
 
-  # 温度
-  ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
-  w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
-  # LED制御SV
-  ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
-  w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
-  # LED電流
-  ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
-  w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
-  # errorの場合はリセットコマンドを発行する
-  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
-  sleep 0.01
+  # 過大光は赤色で
+  ary = w.spi.dataRW([0x1f,0x40,0x80,0xc0])
+  style = Gtk::Style.new
+  style.set_fg(Gtk::STATE_NORMAL, ((ary[3]&0x02)==0x02)?65535:0, 0, 0)
+  w.lblTime.style = style
+  # 経過時刻表示
+  tim = Time.at(Time.at(Time.now - w.time_st).getutc)
+  w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")
+
+  if ($count%3) == 0
+    # 温度制御SV
+#   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
+#   p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+
+    # 温度
+    ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
+    w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
+    # LED制御SV
+    ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
+    w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
+    # LED電流
+    ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
+    w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
+    # errorの場合はリセットコマンドを発行する
+    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+  end
+  true
 end
 
 Gtk.main()
