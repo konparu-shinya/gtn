@@ -167,6 +167,12 @@ struct _ppm_ctrl {
 // イベント
 static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
+// 動作表示用
+struct _monitor {
+	int	con_no;
+	int	line_no;
+} static monitor;
+
 static struct timespec tim_start;
 
 // CRC計算
@@ -905,6 +911,14 @@ static int sequence(int sock, int fd, int no)
 		}
 	}
 
+	// 実行行の出力
+	if (monitor.con_no!=no || monitor.line_no!=pact->line) {
+		sprintf(str, "%d", pact->line);
+		message(sock, no, 3, 1, str);
+	}
+	monitor.con_no=no;
+	monitor.line_no=pact->line;
+
 	// 終了判定
 	if (pseq->current >= pseq->max_line) {
 		/* 経過時間を表示する */
@@ -1050,6 +1064,9 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			if (pseq->ret_line) {
 				pseq->reg_flag=local_reg_flag[no-1];
 			}
+
+			monitor.con_no=0;
+			monitor.line_no=0;
 		}
 	}
 	// 動作停止
@@ -1181,12 +1198,13 @@ static int execute(int sock, int fd)
             else{
     			unsigned char data[4]={0x05,0x40,0x80,0xc0};
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-                led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
+				led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
             }
 			pthread_mutex_unlock(mutex);
 			// 5秒ごとに表示
 			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
-				sprintf(str, "%03X %.2f℃", led_conf, temp);
+		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
+				sprintf(str, "%.2f℃", temp);
 				message(sock, 0, 1, 1, str);
 				tim_last2=tim_now;
 			}

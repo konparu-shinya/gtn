@@ -2635,7 +2635,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
+  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_tim, :time_st, :main_goline, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
 
   def initialize( size )
 #    @prj_no = 1
@@ -2736,14 +2736,19 @@ class Gtn
     btnStop     = Gtk::Button.new( 'EMG STOP' )
     btnClose    = Gtk::Button.new( '終了' )
     @main_sts   = Gtk::Label.new( "" )
+    @main_tim   = Gtk::Label.new( "" )
+    @main_goline= Gtk::Label.new( "" )
     @main_info  = Gtk::Label.new( "" )
+    @time_st    = Time.now
 
     group3 = Gtk::Table.new( 2, 2, false )
-    group3.attach( @main_sts,                0,  3, 0, 1 )
-    group3.attach( @main_info,               0,  3, 1, 2 )
-    group3.attach( btnStart,                 0,  1, 2, 3 )
-    group3.attach( btnStop,                  1,  2, 2, 3 )
-    group3.attach( btnClose,                 2,  3, 2, 3 )
+    group3.attach( @main_sts,                0,  2, 0, 1 )
+    group3.attach( @main_tim,                2,  3, 0, 1 )
+    group3.attach( @main_goline,             0,  3, 1, 2 )
+    group3.attach( @main_info,               0,  3, 2, 3 )
+    group3.attach( btnStart,                 0,  1, 3, 4 )
+    group3.attach( btnStop,                  1,  2, 3, 4 )
+    group3.attach( btnClose,                 2,  3, 3, 4 )
 
     # 全体
     table = Gtk::Table.new( 2, 62, false )
@@ -2920,8 +2925,11 @@ class Gtn
           end
         end
         $main_form.main_sts.set_text( "RUN" )
+        $main_form.main_goline.set_text( "" )
+        @time_st = Time.now
       else
         $main_form.main_sts.set_text( "Socket送受信エラー!!" )
+        $main_form.main_goline.set_text( "" )
       end
     end
 
@@ -3043,13 +3051,22 @@ else
   MkProject.new
 end
 
+# RUN中であれば経過時間を表示する
+Gtk.timeout_add( 1000 ) do
+  if $main_form.main_sts.text == 'RUN'
+    tim = Time.at(Time.at(Time.now - $main_form.time_st).getutc)
+    $main_form.main_tim.set_text("#{tim.strftime('%H:%M:%S')}")
+  end
+  true
+end
+
 # RTタスクからの受信処理
 Gtk.timeout_add( 200 ) do
   $sock_port.nt_recv_each do |rcv_msg|
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
 
     # ベース画面のステータス表示
-    if my_no == 0 && msg
+    if my_no == 0 && dsp == 1 && msg
       $main_form.main_info.set_text( msg )
     end
 
@@ -3059,6 +3076,7 @@ Gtk.timeout_add( 200 ) do
       # 全てstopであれば全体ステータスを表示
       if $main_form.status.map { |x| x.text }.uniq == ['stop']
         $main_form.main_sts.set_text( msg )
+        $main_form.main_goline.set_text( "" )
       end
     end
 
@@ -3124,6 +3142,22 @@ Gtk.timeout_add( 200 ) do
           $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)
         end
       end while iter.next!
+
+    # 実行行番号
+    elsif my_no > 0 && dsp == 3 && msg
+      eline = msg.to_i
+      fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
+      if File.exist?( fname )
+        open( fname, "r" ) do |f|
+          while rline = f.gets
+            ary = (rline.chop).split( /,/ )
+            if ary[0].to_i == eline.to_i
+              $main_form.main_goline.set_text( "#{eline}:#{ary[1]}" )
+              break
+            end
+          end
+        end
+      end
     end
 
     # A/D取り込みファイルのgmail送信
@@ -3148,60 +3182,6 @@ Gtk.timeout_add( 200 ) do
   end
   true
 end
-
-=begin
-Gtk.timeout_add( 500 ) do
-  # SIO受信
-  if $sio_form
-    ary = []
-    $sio_dev.each do |tty|
-      next if tty == nil || tty == ''
-      ary.push open( tty, 'r' )
-    end
-
-    ret = select( ary, [], [], 0.01 )
-#p ret
-    if ret && ret[0]
-      ret[0].each do |f|
-        $sio_form.text.insert_text( "R:#{f.gets}¥n", 0 )
-      end
-    end
-    ary.each { |tty| tty.close }
-
-  # SIO受信表示画面が閉じられているので再表示
-  else
-    $sio_form = SioWindow.new if $sio_do
-  end
-
-  # A/D受信
-  if $fd_ad
-    n = $fd_ad.ioctl( 3 )                 # 受信数取得
-
-    # 16チャンネル毎に読み出す
-    while n>31
-      rd = $fd_ad.sysread(32).unpack("S*")    # read
-      n -= 32
-
-      buf = []
-      rd.each { |p| buf.push( "%1.1f" % [(p.to_f-32768.0) * 10000.0 / 65536.0 ] ) }
-      $ad_log << buf.join(',') + "¥n"
-    end
-
-    # A/D終了
-    (1..20).each do |i|
-      break if $main_form.status[ i-1 ].text != "stop"
-      if i==20 && n < 1
-        $ad_log.close
-        $ad_log = nil
-        $fd_ad.close
-        $fd_ad = nil
-      end
-    end
-  end
-
-  true
-end
-=end
 
 Gtk.main
 
