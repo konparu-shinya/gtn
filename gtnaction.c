@@ -93,6 +93,7 @@ struct _seq_tbl {
 	int ret_line;				// 1:Step実行(動作終了時に次のlineを送信する)
 	int reg_flag;				// レジスタ読み込み値の保存
 	int	busy;					// 1:Wait中
+	int	run_line;				// 実行中のline番号
 	struct timespec wai_start;	// Wait開始
 } static seq_tbl[CONSOLE_MAX]={
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
@@ -166,12 +167,6 @@ struct _ppm_ctrl {
 
 // イベント
 static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-
-// 動作表示用
-struct _monitor {
-	int	con_no;
-	int	line_no;
-} static monitor;
 
 static struct timespec tim_start;
 
@@ -912,12 +907,11 @@ static int sequence(int sock, int fd, int no)
 	}
 
 	// 実行行の出力
-	if (monitor.con_no!=no || monitor.line_no!=pact->line) {
+	if (pseq->run_line!=pact->line) {
 		sprintf(str, "%d", pact->line);
 		message(sock, no, 3, 1, str);
 	}
-	monitor.con_no=no;
-	monitor.line_no=pact->line;
+	pseq->run_line=pact->line;
 
 	// 終了判定
 	if (pseq->current >= pseq->max_line) {
@@ -1064,9 +1058,6 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			if (pseq->ret_line) {
 				pseq->reg_flag=local_reg_flag[no-1];
 			}
-
-			monitor.con_no=0;
-			monitor.line_no=0;
 		}
 	}
 	// 動作停止
