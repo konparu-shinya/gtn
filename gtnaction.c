@@ -327,7 +327,7 @@ static int L6470_busy(unsigned char ch)
 }
 
 // L6470 初期設定
-static void L6470_init(unsigned char ch)
+static int L6470_init(unsigned char ch)
 {
 	// NOP x4 -> Reset
 	L6470_write(ch, 0);
@@ -339,6 +339,9 @@ static void L6470_init(unsigned char ch)
 
 	// MIN_SPEED設定。
 	L6470_param_write(ch, 0x08, 0x15);
+	if (L6470_param_read(ch, 0x08)==0) {
+		return -1;
+	}
 	// MAX_SPEED設定。
 	L6470_param_write(ch, 0x07, 20);
 	// KVAL_HOLD設定。
@@ -359,6 +362,7 @@ static void L6470_init(unsigned char ch)
 	L6470_param_write(ch, 0x18, L6470_param_read(ch, 0x18)|0x10);
 	// SoftStop
 	L6470_write(ch, 0xB0);
+	return 0;
 }
 
 // L6470 スピード変更
@@ -388,15 +392,16 @@ static void L6470_change_spd(unsigned char ch, int start_pulse, int max_pulse, i
 }
 
 // パルスモーターの初期化動作
-// 戻値: 0:初期化完了 1:初期化中 -1:Home Out Err -2:Home In Err
+// 戻値: 0:初期化完了 1:初期化中 -1:Home Out Err -2:Home In Err -3:モーター未応答
 static int ppm_init(int ch)
 {
 	struct _ppm_ctrl *pctrl = &ppm_ctrl[ch];
-	int home_in_flag;
+	int sts_port     = L6470_param_read(ch, 0x19);
+	int busy_flag    = ((sts_port&0x02) == 0x00)?1:0;
+	int home_in_flag = ((sts_port&0x04) == 0x00)?1:0;
 
-	if (L6470_busy(ch)) return 1;
-
-	home_in_flag = ((L6470_param_read(ch, 0x19)&0x04) == 0x00)?1:0;
+	if (sts_port==0) return -3;
+	if (busy_flag) return 1;
 
 	switch (pctrl->driving) {
 	case 0:		// 0:not use
@@ -558,7 +563,7 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 // シーケンス
 static int sequence(int sock, int fd, int no)
 {
-	int i;
+	int i, error=0;
 	char str[32];
 	struct _seq_tbl *pseq = &seq_tbl[no-1];
 	struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
@@ -598,6 +603,11 @@ static int sequence(int sock, int fd, int no)
 		case -2:
 			pseq->run = 0;
 			message(sock, no, 1, 1, "ERR HOME In Error");
+			L6470_write(pact->mno-1, 0xB8);	// HardStop
+			break;
+		case -3:
+			pseq->run = 0;
+			message(sock, no, 1, 1, "ERR モーター未応答");
 			L6470_write(pact->mno-1, 0xB8);	// HardStop
 			break;
 		default:
@@ -795,7 +805,7 @@ static int sequence(int sock, int fd, int no)
 	case 0x57:		// エラー停止
 		sprintf(str, "ERR 行番号 = %d", pact->line);
 		message(sock, no, 1, 1, str);
-		pseq->run = 0;
+		error=1;
 		break;
 	case 0x61:		// イベントセット
         event[pact->move_pulse-1]=1;
@@ -919,7 +929,7 @@ static int sequence(int sock, int fd, int no)
 	pseq->run_line=pact->line;
 
 	// 終了判定
-	if (pseq->current >= pseq->max_line) {
+	if (pseq->current >= pseq->max_line || error) {
 		/* 経過時間を表示する */
 		time_t msec;
 		long sec;
@@ -938,9 +948,11 @@ static int sequence(int sock, int fd, int no)
 
 		pseq->count++;
 		// 終了
-		if (pseq->count >= pseq->run_times) {
+		if (pseq->count >= pseq->run_times || error) {
 			pseq->run = 0;
-			message(sock, no, 1, 1, "success!!");
+			if (error==0) {
+				message(sock, no, 1, 1, "success!!");
+			}
 			/* 次の行番号を送る */
 			if (pseq->ret_line) {
 				sprintf(str, "%d", local_ret_line);
@@ -1003,7 +1015,10 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 		pctrl->speed.max   =0;
 		pctrl->speed.acc   =0;
 		pctrl->speed.dec   =0;
-		L6470_init(no-1);
+		if (L6470_init(no-1)) {
+			sprintf(str, "ERR モーター未応答 %d", no);
+			message(sock, 0, 1, 1, str);
+		}
 	}
 	// DCモーター設定
 	else if (id==0xC103 && run_flag==0) {
@@ -1142,6 +1157,9 @@ static int execute(int sock, int fd)
 	clock_gettime(CLOCK_MONOTONIC, &tim_last);
 	tim_last2=tim_last;
 
+	if (fd<0) {
+		message(sock, 0, 1, 1, "ERR カウントDevice OPEN");
+	}
 	// カウンターSTART
 	ioctl(fd, TIOCMBIS, &rts);
 
