@@ -462,30 +462,30 @@ static int ppm_init(int ch)
 }
 
 // 先頭のカウント値を取り出す
-static long get_1st_data(int i)
+static long get_1st_data(char buf[])
 {
 	unsigned long dat=0L;
-	int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
+	int l=((buf[0]&0xe0)==cnt_head[4])?4:0;
 	int j, k;
 	for (j=0; j<(CNT_SZ-3); ) {
-		if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
-			(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
-			(cnt_tbl.buf[i][j+2]&0xe0)==cnt_head[l+2] &&
-			(cnt_tbl.buf[i][j+3]&0xe0)==cnt_head[l+3]) {
+		if ((buf[j+0]&0xe0)==cnt_head[l+0] &&
+			(buf[j+1]&0xe0)==cnt_head[l+1] &&
+			(buf[j+2]&0xe0)==cnt_head[l+2] &&
+			(buf[j+3]&0xe0)==cnt_head[l+3]) {
 			//各4バイトの下位5ビットが測光データ20bits
 			for (k=0; k<=3; k++) {
-				dat += (cnt_tbl.buf[i][j+k]&0x1f) << (5*k);
+				dat += (buf[j+k]&0x1f) << (5*k);
 			}
 			break;
 		}
 		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
 		else{
 			for (j=j+1; j<CNT_SZ; j++) {
-				if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[0]) {
+				if ((buf[j]&0xe0)==cnt_head[0]) {
 					l=0;
 					break;
 				}
-				if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[4]) {
+				if ((buf[j]&0xe0)==cnt_head[4]) {
 					l=4;
 					break;
 				}
@@ -540,6 +540,7 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 							break;
 						}
 					}
+printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0);
 				}
 			}
 //			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
@@ -892,16 +893,17 @@ static int sequence(int sock, int fd, int no)
 		// 取り込み終了判定(取り込み開始ディレイがあるので+1まで取り込む)
 		if ((cnt_tbl.times+1) <= sec) {
 			// カウンターSTOP
-			ioctl(fd, TIOCMBIC, &rts);
+			//ioctl(fd, TIOCMBIC, &rts);
 			cnt_tbl.busy=0;
 		}
 		// 1秒ごとの表示
 		else if (cnt_tbl.sec < sec) {
+			long data=(cnt_tbl.n>0)?get_1st_data(cnt_tbl.buf[cnt_tbl.n-1]):0L;
 			cnt_tbl.sec = sec;
-			sprintf(str, "取込:%lu秒 :%ld", sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
+			sprintf(str, "取込:%lu秒 :%ld", sec, data);
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, (cnt_tbl.n>0)?get_1st_data(cnt_tbl.n-1):0L);
+			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, data);
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -945,7 +947,7 @@ static int sequence(int sock, int fd, int no)
 			if (cnt_tbl.owner==no && cnt_tbl.n>0) {
 				char tmp[32];
 				// カウンターSTOP
-				ioctl(fd, TIOCMBIC, &rts);
+				//ioctl(fd, TIOCMBIC, &rts);
 				cnt_tbl.busy=0;
 				if (count_save(tmp)==0) {
 					sprintf(str, "FILE %s", tmp);
@@ -1093,7 +1095,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			}
 		}
 		// カウント強制停止
-		ioctl(fd, TIOCMBIC, &rts);
+		//ioctl(fd, TIOCMBIC, &rts);
 		cnt_tbl.busy=0;
 		// カウント値取得済であればファイルに保存する
 		if (cnt_tbl.n>0) {
@@ -1131,11 +1133,15 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 static int execute(int sock, int fd)
 {
 	char buf[512], str[32];
-	int i, len=1;
+	int i, n, len=1;
 	struct timespec tim_last, tim_last2, tim_now;
+	long cnt_data=0L;
 
 	clock_gettime(CLOCK_MONOTONIC, &tim_last);
 	tim_last2=tim_last;
+
+	// カウンターSTART
+	ioctl(fd, TIOCMBIS, &rts);
 
 	while (len!=0) {
 
@@ -1192,16 +1198,29 @@ static int execute(int sock, int fd)
 				led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
             }
 			pthread_mutex_unlock(mutex);
+
+			// カウント取り込みが非動作であればここでデータを取り込む
+			if (fd>-1 && cnt_tbl.busy==0) {
+				ioctl(fd, FIONREAD, &n);
+				if (n>=CNT_SZ) {
+					read(fd, buf, CNT_SZ);
+					tcflush(fd, TCIFLUSH);
+					cnt_data=get_1st_data(buf);
+				}
+			}
+
 			// 5秒ごとに表示
-			if ((tim_last2.tv_sec+5)<tim_now.tv_sec && cnt_tbl.busy==0) {
+			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%.2f℃", temp);
+				sprintf(str, "%.2f℃   %ld", temp, cnt_data);
 				message(sock, 0, 1, 1, str);
 				tim_last2=tim_now;
 			}
 			tim_last=tim_now;
 		}
 	}
+	// カウンターSTOP
+	ioctl(fd, TIOCMBIC, &rts);
 	return 0;
 }
 
