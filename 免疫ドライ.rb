@@ -343,7 +343,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enSerial, :status, :main_sts, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action, :file_ana
+  attr_accessor :prj_no, :console_opened, :enSerial, :status, :main_sts, :main_tim, :time_st, :main_goline,  :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action, :file_ana
 
   def initialize()
 
@@ -385,8 +385,11 @@ class Gtn
     btnSyrUp   = Gtk::Button.new( 'シリンジUP' )
     btnSyrDn   = Gtk::Button.new( 'シリンジDown' )
     btnMixMove = Gtk::Button.new( '撹拌回転' )
-    @main_sts  = Gtk::Label.new( "" )
-    @main_info = Gtk::Label.new( "" )
+    @main_sts   = Gtk::Label.new( "" )
+    @main_tim   = Gtk::Label.new( "" )
+    @main_goline= Gtk::Label.new( "" )
+    @main_info  = Gtk::Label.new( "" )
+    @time_st    = Time.now
 
     table = Gtk::Table.new( 1, 6, true )
     table.attach( gouki,        0, 1, 0, 1 )
@@ -405,9 +408,10 @@ class Gtn
 
     table.attach( btnStop,      5, 6, 1,10 )
 
-
-    table.attach( @main_sts,    1, 5,10,11 )
-    table.attach( @main_info,   1, 5,11,12 )
+    table.attach( @main_sts,    1, 3,10,11 )
+    table.attach( @main_tim,    3, 5,10,11 )
+    table.attach( @main_goline, 1, 5,11,12 )
+    table.attach( @main_info,   1, 5,12,13 )
 
     form.add table
     form.show_all
@@ -551,13 +555,21 @@ class Gtn
           end
         end
         style = Gtk::Style.new
-        style.font_desc = Pango::FontDescription.new("Monospace 18")
-       #style.set_fg(Gtk::STATE_NORMAL, 0, 65535, 0)
-        style.set_fg(Gtk::STATE_NORMAL, 0, 60000, 0)
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
         $main_form.main_sts.style = style
+
         $main_form.main_sts.set_text( "RUN" )
+        $main_form.main_goline.set_text( "" )
+        @time_st = Time.now
       else
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+        $main_form.main_sts.style = style
+
         $main_form.main_sts.set_text( "Socket送受信エラー!!" )
+        $main_form.main_goline.set_text( "" )
       end
     end
 
@@ -676,26 +688,45 @@ $sock_port = MySocket.new
 $main_form = Gtn.new
 $main_form.setup
 
+# RUN中であれば経過時間を表示する
+Gtk.timeout_add( 1000 ) do
+  if $main_form.main_sts.text == 'RUN'
+    tim = Time.at(Time.at(Time.now - $main_form.time_st).getutc)
+    $main_form.main_tim.set_text("#{tim.strftime('%H:%M:%S')}")
+  end
+  true
+end
+
 # RTタスクからの受信処理
 Gtk.timeout_add( 200 ) do
   $sock_port.nt_recv_each do |rcv_msg|
     stx, len, type, dmy, id, my_no, dsp, line, msg, crc, etx = rcv_msg.pack('C*').unpack('C4nC3A32C2')
 
     # ベース画面のステータス表示
-    if my_no == 0 && msg
+    if my_no == 0 && dsp == 1 && msg
       $main_form.main_info.set_text( msg )
     end
 
     # ベース画面の各状態をstopに
-    if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
-      $main_form.status[ my_no-1 ].set_text( 'stop' )
+    if line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+      $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0
       # 全てstopであれば全体ステータスを表示
       if $main_form.status.map { |x| x.text }.uniq == ['stop']
-        style = Gtk::Style.new
-        style.font_desc = Pango::FontDescription.new("Monospace 14")
-        style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
-        $main_form.main_sts.style = style
+        # エラーは赤文字
+        if msg[0,3] == 'ERR'
+          style = Gtk::Style.new
+          style.font_desc = Pango::FontDescription.new("Monospace 14")
+          style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+          $main_form.main_sts.style = style
+        # それ以外は黒文字
+        else
+          style = Gtk::Style.new
+          style.font_desc = Pango::FontDescription.new("Monospace 14")
+          style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+          $main_form.main_sts.style = style
+        end
         $main_form.main_sts.set_text( msg )
+        $main_form.main_goline.set_text( "" )
       end
     end
 
@@ -761,6 +792,25 @@ Gtk.timeout_add( 200 ) do
           $main_form.console_opened[ my_no ].treeview.selection.unselect_iter(iter)
         end
       end while iter.next!
+
+    # 実行行番号
+    elsif dsp == 3 && msg
+      eline = msg.to_i
+      fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
+      if File.exist?( fname )
+        open( fname, "r" ) do |f|
+          while rline = f.gets
+            ary = (rline.chop).split( /,/ )
+            if ary[0].to_i == eline.to_i
+              $main_form.main_goline.set_text( "#{my_no}-#{eline}:#{ary[1]}" )
+              if $main_form.console_opened[ my_no ]
+                $main_form.console_opened[ my_no ].lblStatus[ 1 ].set_text( "#{eline}:#{ary[1]}" )
+              end
+              break
+            end
+          end
+        end
+      end
     end
 
     # A/D取り込みファイルのgmail送信
