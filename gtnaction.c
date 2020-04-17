@@ -901,12 +901,12 @@ static int sequence(int sock, int fd, int no)
 		}
 		// 1秒ごとの表示
 		else if (cnt_tbl.sec < sec) {
-			long data=(cnt_tbl.n>0)?get_1st_data(cnt_tbl.buf[cnt_tbl.n-1]):0L;
+			shm->count=(cnt_tbl.n>0)?get_1st_data(cnt_tbl.buf[cnt_tbl.n-1]):0L;
 			cnt_tbl.sec = sec;
-			sprintf(str, "取込:%lu秒 :%ld", sec, data);
+			sprintf(str, "取込:%lu秒 :%ld", sec, shm->count);
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, data);
+			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, shm->count);
 			message(sock, 0, 1, 1, str);
 		}
 	}
