@@ -3144,7 +3144,7 @@ Gtk.timeout_add( 200 ) do
       end while iter.next!
 
     # 実行行番号
-    elsif my_no > 0 && dsp == 3 && msg
+    elsif dsp == 3 && msg
       eline = msg.to_i
       fname = $main_form.file_action + "#{my_no}" + Kakuchou_si
       if File.exist?( fname )
@@ -3152,7 +3152,10 @@ Gtk.timeout_add( 200 ) do
           while rline = f.gets
             ary = (rline.chop).split( /,/ )
             if ary[0].to_i == eline.to_i
-              $main_form.main_goline.set_text( "#{eline}:#{ary[1]}" )
+              $main_form.main_goline.set_text( "#{my_no}-#{eline}:#{ary[1]}" )
+              if $main_form.console_opened[ my_no ]
+                $main_form.console_opened[ my_no ].lblStatus[ 1 ].set_text( "#{eline}:#{ary[1]}" )
+              end
               break
             end
           end
