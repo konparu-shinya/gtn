@@ -9,7 +9,10 @@
 // MAX1000との接続SPI０
 #define MAX_SPI_CHANNEL 0
 
-static pthread_mutex_t *mutex;
+struct _shm {
+	pthread_mutex_t mutex;	// ミューテックス
+	long	count;			// フォトンカウント値
+} static *shm;
 
 static VALUE fwiringPiSpi_datarw(VALUE self, VALUE arg)
 {
@@ -25,9 +28,9 @@ static VALUE fwiringPiSpi_datarw(VALUE self, VALUE arg)
 printf("%s %d %d %02X\n", __FILE__, __LINE__, i, (unsigned char)FIX2INT(rb_ary_entry(arg, i)));
 			data[i]=FIX2INT(rb_ary_entry(arg, i));
 		}
-		pthread_mutex_lock(mutex);
+		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, len);
-		pthread_mutex_unlock(mutex);
+		pthread_mutex_unlock(&shm->mutex);
 
 		ret = rb_ary_new2(len);
 		for (i=0; i<len; i++) {
@@ -40,11 +43,16 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, (unsigned char)FIX2INT(rb_ary_e
 static VALUE fwiringPiSpi_setup_mode(VALUE self, VALUE arg1, VALUE arg2)
 {
 printf("%s %d %d %d\n", __FILE__, __LINE__, FIX2INT(arg1), FIX2INT(arg2));
-	pthread_mutex_lock(mutex);
+	pthread_mutex_lock(&shm->mutex);
 	/* SPI channel 0 を 1MHz で開始 */
 	wiringPiSPISetupMode(MAX_SPI_CHANNEL, FIX2INT(arg1), FIX2INT(arg2));
-	pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&shm->mutex);
 	return self;
+}
+
+static VALUE fwiringPiSpi_foton_count(VALUE self)
+{
+	return INT2FIX(shm->count);
 }
 
 static int mutex_init(void)
@@ -53,15 +61,15 @@ static int mutex_init(void)
 	int shmid;
 	/* mutex用に共有メモリを利用 */
 	const key_t key = 112;
-	shmid = shmget(key, sizeof(pthread_mutex_t), 0600);
+	shmid = shmget(key, sizeof(struct _shm), 0600);
 	/* 初回 */
 	if (shmid < 0) {
-		shmid = shmget(key, sizeof(pthread_mutex_t), 0600|IPC_CREAT);
+		shmid = shmget(key, sizeof(struct _shm), 0600|IPC_CREAT);
 		if (shmid < 0) {
 			return -1;
 		}
-		mutex = shmat(shmid, NULL, 0);
-		if ((intptr_t)mutex == -1) {
+		shm = shmat(shmid, NULL, 0);
+		if ((intptr_t)shm == -1) {
 			return -1;
 		}
 
@@ -74,13 +82,13 @@ static int mutex_init(void)
 			return -1;
 		}
 
-		pthread_mutex_init(mutex, &mat);
-
+		pthread_mutex_init(&shm->mutex, &mat);
+		shm->count=0L;
 	}
 	/* 既に起動済 */
 	else{
-		mutex = shmat(shmid, NULL, 0);
-		if ((intptr_t)mutex == -1) {
+		shm = shmat(shmid, NULL, 0);
+		if ((intptr_t)shm == -1) {
 			return -1;
 		}
 	}
@@ -92,6 +100,7 @@ void Init_WiringPiSpi(void)
 	VALUE cWiringPi = rb_define_class("WiringPiSpi", rb_cObject);
 	rb_define_method(cWiringPi, "setup_mode", fwiringPiSpi_setup_mode, 2);
 	rb_define_method(cWiringPi, "dataRW", fwiringPiSpi_datarw, 1);
+	rb_define_method(cWiringPi, "foton_count", fwiringPiSpi_foton_count, 0);
 
 	mutex_init();
 }

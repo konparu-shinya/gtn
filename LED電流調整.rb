@@ -24,7 +24,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblTime, :time_st
+  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :time_st
 
   def initialize
     @spi = WiringPiSpi.new
@@ -56,8 +56,9 @@ class Window
     @entTMP.set_text("40")
     @entTMP.set_max_length(2)
     @entTMP.set_xalign(1)
-    @cbOnOff = Gtk::CheckButton.new('LED ON')
-    @lblTime = Gtk::Label.new("-");
+    @cbOnOff  = Gtk::CheckButton.new('LED ON')
+    @lblCount = Gtk::Label.new("-");
+    @lblTime  = Gtk::Label.new("-");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -112,7 +113,8 @@ class Window
     tbl.attach_defaults(@scrl,    1, 7, 1, 2)
     tbl.attach_defaults(rbtn,     7, 8, 1, 2)
     tbl.attach_defaults(@cbOnOff, 2, 4, 2, 3)
-    tbl.attach_defaults(@lblTime, 4, 7, 2, 3)
+    tbl.attach_defaults(@lblCount,4, 6, 2, 3)
+    tbl.attach_defaults(@lblTime, 6, 8, 2, 3)
     tbl.attach_defaults(lblTMP,   0, 2, 3, 4)
     tbl.attach_defaults(@entTMP,  2, 5, 3, 4)
     tbl.attach_defaults(lblDo,    5, 6, 3, 4)
@@ -183,6 +185,8 @@ p [__LINE__, $count]
   style = Gtk::Style.new
   style.set_fg(Gtk::STATE_NORMAL, ((ary[3]&0x02)==0x02)?65535:0, 0, 0)
   w.lblTime.style = style
+  # gtnactionからフォトンカウント値を取得
+  w.lblCount.set_text("#{w.spi.foton_count}")
   # 経過時刻表示
   tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")

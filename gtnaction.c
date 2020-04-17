@@ -42,7 +42,10 @@ static double	temp=0.0;
 
 // MAX1000との接続SPI０
 #define MAX_SPI_CHANNEL 0
-static pthread_mutex_t *mutex;
+struct _shm {
+	pthread_mutex_t mutex;	// ミューテックス
+	long	count;			// フォトンカウント値
+} static *shm;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
 #define L6470_SPI_L6470 1
@@ -272,9 +275,9 @@ static void config_temp(double target)
 		unsigned char data[4]={0x29,0x40,0x80,0xc0};
 		data[2] += (unsigned char)(((unsigned short)TEMP2HEX(target))>>6); 
 		data[3] += (unsigned char)(TEMP2HEX(target)&0x3f);
-		pthread_mutex_lock(mutex);
+		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-		pthread_mutex_unlock(mutex);
+		pthread_mutex_unlock(&shm->mutex);
 }
 
 // L6470に1byte送信
@@ -1135,7 +1138,6 @@ static int execute(int sock, int fd)
 	char buf[512], str[32];
 	int i, n, len=1;
 	struct timespec tim_last, tim_last2, tim_now;
-	long cnt_data=0L;
 
 	clock_gettime(CLOCK_MONOTONIC, &tim_last);
 	tim_last2=tim_last;
@@ -1175,7 +1177,7 @@ static int execute(int sock, int fd)
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if (tim_last.tv_sec<tim_now.tv_sec) {
         static int flag=0, led_conf=0;
-			pthread_mutex_lock(mutex);
+			pthread_mutex_lock(&shm->mutex);
             flag^=1;
             // 温度
             if (flag) {
@@ -1197,7 +1199,7 @@ static int execute(int sock, int fd)
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 				led_conf = ((data[2]&0x3f)<<6) + (data[3]&0x3f);
             }
-			pthread_mutex_unlock(mutex);
+			pthread_mutex_unlock(&shm->mutex);
 
 			// カウント取り込みが非動作であればここでデータを取り込む
 			if (fd>-1 && cnt_tbl.busy==0) {
@@ -1205,14 +1207,14 @@ static int execute(int sock, int fd)
 				if (n>=CNT_SZ) {
 					read(fd, buf, CNT_SZ);
 					tcflush(fd, TCIFLUSH);
-					cnt_data=get_1st_data(buf);
+					shm->count=get_1st_data(buf);
 				}
 			}
 
 			// 5秒ごとに表示
 			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%.2f℃   %ld", temp, cnt_data);
+				sprintf(str, "%.2f℃   %ld", temp, shm->count);
 				message(sock, 0, 1, 1, str);
 				tim_last2=tim_now;
 			}
@@ -1303,15 +1305,15 @@ static int mutex_init(void)
 	int shmid;
 	/* mutex用に共有メモリを利用 */
 	const key_t key = 112;
-	shmid = shmget(key, sizeof(pthread_mutex_t), 0600);
+	shmid = shmget(key, sizeof(struct _shm), 0600);
 	/* 初回 */
 	if (shmid < 0) {
-		shmid = shmget(key, sizeof(pthread_mutex_t), 0600|IPC_CREAT);
+		shmid = shmget(key, sizeof(struct _shm), 0600|IPC_CREAT);
 		if (shmid < 0) {
 			return -1;
 		}
-		mutex = shmat(shmid, NULL, 0);
-		if ((intptr_t)mutex == -1) {
+		shm = shmat(shmid, NULL, 0);
+		if ((intptr_t)shm == -1) {
 			return -1;
 		}
 
@@ -1324,13 +1326,13 @@ static int mutex_init(void)
 			return -1;
 		}
 
-		pthread_mutex_init(mutex, &mat);
-
+		pthread_mutex_init(&shm->mutex, &mat);
+		shm->count=0L;
 	}
 	/* 既に起動済 */
 	else{
-		mutex = shmat(shmid, NULL, 0);
-		if ((intptr_t)mutex == -1) {
+		shm = shmat(shmid, NULL, 0);
+		if ((intptr_t)shm == -1) {
 			return -1;
 		}
 	}
@@ -1353,13 +1355,13 @@ int main(void)
 
 	mutex_init();
 
-	pthread_mutex_lock(mutex);
+	pthread_mutex_lock(&shm->mutex);
 	/* SPI channel 0 を 1MHz で開始 */
 	if (wiringPiSPISetupMode(MAX_SPI_CHANNEL, 1000000, 3) < 0) {
 		perror("SPI Setup failed:\n");
 		exit(EXIT_FAILURE);
 	}
-	pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&shm->mutex);
 	// 温度設定
 //	config_temp(TARGET_TEMP);
 
