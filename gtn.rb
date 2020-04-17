@@ -2924,10 +2924,20 @@ class Gtn
             end
           end
         end
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+        $main_form.main_sts.style = style
+
         $main_form.main_sts.set_text( "RUN" )
         $main_form.main_goline.set_text( "" )
         @time_st = Time.now
       else
+        style = Gtk::Style.new
+        style.font_desc = Pango::FontDescription.new("Monospace 14")
+        style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+        $main_form.main_sts.style = style
+
         $main_form.main_sts.set_text( "Socket送受信エラー!!" )
         $main_form.main_goline.set_text( "" )
       end
@@ -3071,10 +3081,23 @@ Gtk.timeout_add( 200 ) do
     end
 
     # ベース画面の各状態をstopに
-    if my_no > 0 && line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
-      $main_form.status[ my_no-1 ].set_text( 'stop' )
+    if line == 1 && ( msg == 'success!!' || msg[0,3] == 'ERR' || msg[0,4] == 'STOP' )
+      $main_form.status[ my_no-1 ].set_text( 'stop' ) if my_no > 0
       # 全てstopであれば全体ステータスを表示
       if $main_form.status.map { |x| x.text }.uniq == ['stop']
+        # エラーは赤文字
+        if msg[0,3] == 'ERR'
+          style = Gtk::Style.new
+          style.font_desc = Pango::FontDescription.new("Monospace 14")
+          style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+          $main_form.main_sts.style = style
+        # それ以外は黒文字
+        else
+          style = Gtk::Style.new
+          style.font_desc = Pango::FontDescription.new("Monospace 14")
+          style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+          $main_form.main_sts.style = style
+        end
         $main_form.main_sts.set_text( msg )
         $main_form.main_goline.set_text( "" )
       end
