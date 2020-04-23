@@ -374,10 +374,17 @@ static void L6470_change_spd(unsigned char ch, int start_pulse, int max_pulse, i
 		// MIN_SPEED設定。
 		L6470_param_write(ch, 0x08, (long)((double)start_pulse*(250*pow(10,-9))/(pow(2,-24))));
 	}
+	// start_pulseより小さい場合はstart_pulseの値に矯正する
+	if (max_pulse<start_pulse) {
+		max_pulse=start_pulse;
+	}
 	if (pctrl->speed.max!=max_pulse) {
+		long l = (long)((double)max_pulse*(250*pow(10,-9))/(pow(2,-18)));
+		// MAXは分解能が荒いので設定値より小さくなる場合がある
+		long add = (((double)l*pow(2,-18)/(250*pow(10,-9)))<max_pulse) ? 1L:0L;
 		pctrl->speed.max=max_pulse;
 		// MAX_SPEED設定。
-		L6470_param_write(ch, 0x07, (long)((double)max_pulse*(250*pow(10,-9))/(pow(2,-18))));
+		L6470_param_write(ch, 0x07, l+add);
 	}
 	if (pctrl->speed.acc!=st_slope) {
 		pctrl->speed.acc=st_slope;
