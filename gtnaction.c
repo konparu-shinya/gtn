@@ -476,22 +476,26 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
-// 先頭のカウント値を取り出す
+// buf内のカウント値の平均を求める
 static long get_1st_data(char buf[])
 {
-	unsigned long dat=0L;
+	unsigned long total=0L;
 	int l=((buf[0]&0xe0)==cnt_head[4])?4:0;
-	int j, k;
-	for (j=0; j<(CNT_SZ-3); ) {
+	int j, k, m;
+	for (j=0, m=0; j<(CNT_SZ-3); ) {
 		if ((buf[j+0]&0xe0)==cnt_head[l+0] &&
 			(buf[j+1]&0xe0)==cnt_head[l+1] &&
 			(buf[j+2]&0xe0)==cnt_head[l+2] &&
 			(buf[j+3]&0xe0)==cnt_head[l+3]) {
 			//各4バイトの下位5ビットが測光データ20bits
+			unsigned long dat=0L;
 			for (k=0; k<=3; k++) {
 				dat += (buf[j+k]&0x1f) << (5*k);
 			}
-			break;
+			total += dat;
+			m++;
+			j+=4;
+			l = (l+4)%8;
 		}
 		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
 		else{
@@ -507,7 +511,7 @@ static long get_1st_data(char buf[])
 			}
 		}
 	}
-	return dat;
+	return total/m;
 }
 
 // カウント値をファイルに保存する
@@ -1236,7 +1240,7 @@ static int execute(int sock, int fd)
 				}
 			}
 
-			// 5秒ごとに表示
+			// 1秒ごとに表示
 			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
 				sprintf(str, "%.2f℃   %ld", temp, shm->count);
