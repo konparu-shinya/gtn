@@ -1,7 +1,7 @@
 #!/usr/bin/ruby
 
 require 'gtk2'
-#require 'kconv'
+require 'kconv'
 require 'fileutils'
 require 'socket'
 require 'gmail'
@@ -138,7 +138,7 @@ class MySocket
   def calc_crc(m)
     crc = 0x84
 
-    m[1..-3].each do |c|
+    m.bytes[1..-3].each do |c|
       crc = ((((crc>>1)|(crc<<7)))&0xff)^c 
     end
     return crc
@@ -146,7 +146,7 @@ class MySocket
 
   # NT1200(アーキテクト)フォーマットでデータ送信しACK/NACKを待つ
   def nt_send(sbuf, packstr)
-    sbuf[-2] = calc_crc(sbuf)
+    sbuf[-2] = calc_crc( sbuf.pack(packstr) )
 #p [__LINE__, sbuf.pack(packstr), sbuf.pack(packstr).size ]
     @port.write( sbuf.pack(packstr) )
     @port.flush
@@ -3033,6 +3033,28 @@ end
 
 # パラメータディレクトリを生成する
 Prjs.each { |x|  Dir.mkdir( x ) if File.exist?( x ) == false }
+
+host = 'linux'
+if RUBY_PLATFORM =~ /mingw32/
+  host = 'win'
+end
+
+Dir.glob("#{BasePrm}/**/*.pr6") do |file|
+  frstr = IO.readlines(file).join('')
+  # windows UTF-8 -> SJIS
+  if host=='win' && Kconv::guess(frstr)==Kconv::UTF8
+    open(file, 'w') do |fw|
+      fw << frstr.tosjis
+    end
+  # linux SJIS -> UTF-8
+  elsif host=='linux' && Kconv::guess(frstr)==Kconv::SJIS
+    open(file, 'w') do |fw|
+      fw << frstr.toutf8
+    end
+  end
+end
+
+
 
 $sio_do = false
 $ad_do  = false
