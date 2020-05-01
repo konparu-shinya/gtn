@@ -25,7 +25,7 @@ static VALUE fwiringPiSpi_datarw(VALUE self, VALUE arg)
 		int len = RARRAY_LEN(arg);
 		unsigned char data[len];
 		for (i=0; i<len; i++) {
-printf("%s %d %d %02X\n", __FILE__, __LINE__, i, (unsigned char)FIX2INT(rb_ary_entry(arg, i)));
+//printf("%s %d %d %02X\n", __FILE__, __LINE__, i, (unsigned char)FIX2INT(rb_ary_entry(arg, i)));
 			data[i]=FIX2INT(rb_ary_entry(arg, i));
 		}
 		pthread_mutex_lock(&shm->mutex);
