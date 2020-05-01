@@ -38,7 +38,8 @@
 #define	HEX2TEMP(a)	((double)(a)*0.0256-28.084)
 //#define	TEMP2HEX(a)	(unsigned short)(((double)(a)+29.061)/0.0263)
 #define	TEMP2HEX(a)	(unsigned short)(((double)(a)+28.084)/0.0256)
-static double	temp=0.0;
+//static double	temp=0.0;
+static int	temp=TEMP2HEX(0);
 
 // MAX1000との接続SPI０
 #define MAX_SPI_CHANNEL 0
@@ -927,7 +928,7 @@ static int sequence(int sock, int fd, int no)
 			sprintf(str, "取込:%lu秒 :%ld", sec, shm->count);
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%.2f℃   取込:%lu秒 :%ld", temp, sec, shm->count);
+			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, sec, shm->count);
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -1214,7 +1215,8 @@ static int execute(int sock, int fd)
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 		    	// OK
 			    if (data[0]==1) {
-				    temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+				//  temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+				    temp = (((data[2]&0x3f)<<6) + (data[3]&0x3f));
     			}
 	    		// ERR
 		    	else if (data[0]==0x20) {
@@ -1243,7 +1245,7 @@ static int execute(int sock, int fd)
 			// 1秒ごとに表示
 			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%.2f℃   %ld", temp, shm->count);
+				sprintf(str, "%d℃   %ld", temp, shm->count);
 				message(sock, 0, 1, 1, str);
 				tim_last2=tim_now;
 			}

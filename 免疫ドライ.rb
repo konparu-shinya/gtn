@@ -1,7 +1,7 @@
 #!/usr/bin/ruby
 
 require 'gtk2'
-#require 'kconv'
+require 'kconv'
 require 'fileutils'
 require 'socket'
 require 'gmail'
@@ -63,6 +63,20 @@ style "default"
 widget_class "*" style "default"
 EndOfText
 =end
+
+$fact_a = 0.0256
+$fact_b = -28.084
+
+def hex2temp(a)
+# return (a*0.0256-28.084).round(2)
+  b = (a*$fact_a+$fact_b).round(2)
+  return (b>0) ? b:0.00
+end
+
+def temp2hex(a)
+# return ((a+28.084)/0.0256).to_i
+  return ((a-$fact_b)/$fact_a).to_i
+end
 
 $act_hash_ppm = {
   0x11 => 'Init.',
@@ -598,7 +612,7 @@ class Gtn
     $main_form.file_gpio   = "#{Prjs[$main_form.prj_no]}/gpio#{Kakuchou_si}"
     $main_form.file_config = "#{Prjs[$main_form.prj_no]}/config#{Kakuchou_si}"
     $main_form.file_action = "#{Prjs[$main_form.prj_no]}/action"
-    $main_form.file_ana    = "#{Prjs[$main_form.prj_no]}/免疫ドライシステム#{Kakuchou_si}"
+    $main_form.file_ana    = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
 
     # スレッド通知
     $sock_port.nt_send( [STX, 0x08, 0x00, 0x00, 0xC012, $main_form.prj_no, gpio_info(), 0x00, ETX], 'C4nC4' ) if $sock_port.open_err == nil
@@ -630,6 +644,10 @@ class Gtn
           case ary[0]
           when 'ana_no'
             @enSerial.set_text( ary[1] ) if ary[1]
+          when 'fact_a'
+            $fact_a = ary[1].to_f if ary[1]
+          when 'fact_b'
+            $fact_b = ary[1].to_f if ary[1]
           end
         end
       end
@@ -680,6 +698,26 @@ end
 #-------------------------------------------------------------------------------
 # ここからSTART
 #-------------------------------------------------------------------------------
+host = 'linux'
+if RUBY_PLATFORM =~ /mingw32/
+  host = 'win'
+end
+
+Dir.glob("#{BasePrm}/**/*.pr6") do |file|
+  frstr = IO.readlines(file).join('')
+  # windows UTF-8 -> SJIS
+  if host=='win' && Kconv::guess(frstr)==Kconv::UTF8
+    open(file, 'w') do |fw|
+      fw << frstr.tosjis
+    end
+  # linux SJIS -> UTF-8
+  elsif host=='linux' && Kconv::guess(frstr)==Kconv::SJIS
+    open(file, 'w') do |fw|
+      fw << frstr.toutf8
+    end
+  end
+end
+
 
 # 通信オブジェクト生成
 $sock_port = MySocket.new
@@ -704,6 +742,9 @@ Gtk.timeout_add( 200 ) do
 
     # ベース画面のステータス表示
     if my_no == 0 && dsp == 1 && msg
+      if /(.*)℃/ =~ msg.force_encoding("UTF-8")
+        msg.gsub!(/(.*)℃/, "#{hex2temp($1.to_i)}℃")
+      end
       $main_form.main_info.set_text( msg )
     end
 

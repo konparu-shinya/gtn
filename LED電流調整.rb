@@ -13,14 +13,19 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj06", "#{BasePrm}/prj07", "#{BasePrm}/prj08", "#{BasePrm}/prj09", "#{BasePrm}/prj10",
         "#{BasePrm}/prj11", "#{BasePrm}/prj12", "#{BasePrm}/prj13", "#{BasePrm}/prj14", "#{BasePrm}/prj15",
         "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
-File_ana = "#{Prjs[1]}/免疫ドライシステム#{Kakuchou_si}"
+File_ana = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
+
+$fact_a = 0.0256
+$fact_b = -28.084
 
 def hex2temp(a)
-  return (a*0.0256-28.084).round(2)
+# return (a*0.0256-28.084).round(2)
+  return (a*$fact_a+$fact_b).round(2)
 end
 
 def temp2hex(a)
-  return ((a+28.084)/0.0256).to_i
+# return ((a+28.084)/0.0256).to_i
+  return ((a-$fact_b)/$fact_a).to_i
 end
 
 class Window
@@ -42,9 +47,6 @@ class Window
     lblLED   = Gtk::Label.new("LED電流値");
     @lblLVal = Gtk::Label.new("-");
     @lblLA   = Gtk::Label.new("-");
-    lblTMP   = Gtk::Label.new("設定温度");
-    lblDo    = Gtk::Label.new("℃");
-    @lblTVal = Gtk::Label.new("-");
     @scrl    = Gtk::HScrollbar.new
     @scrl.set_range(0,0xfff)
     @scrl.set_value(2000)
@@ -52,13 +54,24 @@ class Window
     @entLED.set_max_length(4)
     @entLED.set_xalign(1)
     @entLED.set_text("#{@scrl.value.floor}")
-    @entTMP = Gtk::Entry.new
-    @entTMP.set_text("40")
-    @entTMP.set_max_length(2)
-    @entTMP.set_xalign(1)
     @cbOnOff  = Gtk::CheckButton.new('LED ON')
     @lblCount = Gtk::Label.new("-");
     @lblTime  = Gtk::Label.new("-");
+    lblTMP    = Gtk::Label.new("設定温度");
+    @entTMP   = Gtk::Entry.new
+    @entTMP.set_text("40")
+    @entTMP.set_max_length(2)
+    @entTMP.set_xalign(1)
+    lblDo     = Gtk::Label.new("℃");
+    @lblTVal  = Gtk::Label.new("-");
+    lblTMPCfga  = Gtk::Label.new("温度係数a");
+    @entTMPCfga = Gtk::Entry.new
+    lblTMPCfgb  = Gtk::Label.new("温度係数b");
+    @entTMPCfgb = Gtk::Entry.new
+    @entTMPCfga.set_text("#{$fact_a}")
+    @entTMPCfga.set_xalign(1)
+    @entTMPCfgb.set_text("#{$fact_b}")
+    @entTMPCfgb.set_xalign(1)
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -70,6 +83,12 @@ class Window
             @scrl.set_value(ary[1].to_i) if ary[1]
           when 'temp_sv'
             @entTMP.set_text("#{ary[1]}") if ary[1]
+          when 'fact_a'
+            @entTMPCfga.set_text("#{ary[1]}") if ary[1]
+            $fact_a = @entTMPCfga.text.to_f
+          when 'fact_b'
+            @entTMPCfgb.set_text("#{ary[1]}") if ary[1]
+            $fact_b = @entTMPCfgb.text.to_f
           end
         end
       end
@@ -80,6 +99,14 @@ class Window
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
+    end
+
+    @entTMPCfga.signal_connect('changed') do 
+      $fact_a = @entTMPCfga.text.to_f
+    end
+
+    @entTMPCfgb.signal_connect('changed') do 
+      $fact_b = @entTMPCfgb.text.to_f
     end
 
     @entLED.signal_connect('changed') do 
@@ -105,20 +132,24 @@ class Window
 
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
-    tbl.attach_defaults(lblLED,   0, 2, 0, 1)
-    tbl.attach_defaults(@entLED,  2, 5, 0, 1)
-    tbl.attach_defaults(@lblLVal, 6, 7, 0, 1)
-    tbl.attach_defaults(@lblLA,   7, 8, 0, 1)
-    tbl.attach_defaults(lbtn,     0, 1, 1, 2)
-    tbl.attach_defaults(@scrl,    1, 7, 1, 2)
-    tbl.attach_defaults(rbtn,     7, 8, 1, 2)
-    tbl.attach_defaults(@cbOnOff, 2, 4, 2, 3)
-    tbl.attach_defaults(@lblCount,4, 6, 2, 3)
-    tbl.attach_defaults(@lblTime, 6, 8, 2, 3)
-    tbl.attach_defaults(lblTMP,   0, 2, 3, 4)
-    tbl.attach_defaults(@entTMP,  2, 5, 3, 4)
-    tbl.attach_defaults(lblDo,    5, 6, 3, 4)
-    tbl.attach_defaults(@lblTVal, 6, 7, 3, 4)
+    tbl.attach_defaults(lblLED,     0, 2, 0, 1)
+    tbl.attach_defaults(@entLED,    2, 5, 0, 1)
+    tbl.attach_defaults(@lblLVal,   6, 7, 0, 1)
+    tbl.attach_defaults(@lblLA,     7, 8, 0, 1)
+    tbl.attach_defaults(lbtn,       0, 1, 1, 2)
+    tbl.attach_defaults(@scrl,      1, 7, 1, 2)
+    tbl.attach_defaults(rbtn,       7, 8, 1, 2)
+    tbl.attach_defaults(@cbOnOff,   2, 4, 2, 3)
+    tbl.attach_defaults(@lblCount,  4, 6, 2, 3)
+    tbl.attach_defaults(@lblTime,   6, 8, 2, 3)
+    tbl.attach_defaults(lblTMP,     0, 2, 3, 4)
+    tbl.attach_defaults(@entTMP,    2, 5, 3, 4)
+    tbl.attach_defaults(lblDo,      5, 6, 3, 4)
+    tbl.attach_defaults(@lblTVal,   6, 7, 3, 4)
+    tbl.attach_defaults(lblTMPCfga, 0, 2, 5, 6)
+    tbl.attach_defaults(@entTMPCfga,2, 5, 5, 6)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2, 6, 7)
+    tbl.attach_defaults(@entTMPCfgb,2, 5, 6, 7)
     win.add(tbl)
     win.show_all()
 
@@ -145,8 +176,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set1_flag = nil
-    set2_flag = nil
+    set_flag = [nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -156,17 +186,25 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       case ary[0]
       when 'led_sv'
         fw << "led_sv=#{@entLED.text.to_i}\n"
-        set1_flag = true
+        set_flag[0] = true
       when 'temp_sv'
         fw << "temp_sv=#{@entTMP.text.to_i}\n"
-        set2_flag = true
+        set_flag[1] = true
+      when 'fact_a'
+        fw << "fact_a=#{$fact_a}\n"
+        set_flag[2] = true
+      when 'fact_b'
+        fw << "fact_b=#{$fact_b}\n"
+        set_flag[3] = true
       else
         fw << line
       end
     end
 
-    fw << "led_sv=#{@entLED.text.to_i}\n" if set1_flag == nil
-    fw << "temp_sv=#{@entTMP.text.to_i}\n" if set2_flag == nil
+    fw << "led_sv=#{@entLED.text.to_i}\n" if set_flag[0] == nil
+    fw << "temp_sv=#{@entTMP.text.to_i}\n" if set_flag[1] == nil
+    fw << "fact_a=#{$fact_a}\n" if set_flag[2] == nil
+    fw << "fact_b=#{$fact_b}\n" if set_flag[3] == nil
     fw.close
 
     Gtk.main_quit()
@@ -178,7 +216,7 @@ w = Window.new
 $count = 0
 Gtk.timeout_add( 1000 ) do
   $count += 1
-p [__LINE__, $count]
+#p [__LINE__, $count]
 
   # 過大光は赤色で
   ary = w.spi.dataRW([0x1f,0x40,0x80,0xc0])

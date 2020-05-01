@@ -32,6 +32,7 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj06", "#{BasePrm}/prj07", "#{BasePrm}/prj08", "#{BasePrm}/prj09", "#{BasePrm}/prj10",
         "#{BasePrm}/prj11", "#{BasePrm}/prj12", "#{BasePrm}/prj13", "#{BasePrm}/prj14", "#{BasePrm}/prj15",
         "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
+File_ana = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
 
 ACK = 0x06
 NAK = 0x15
@@ -64,6 +65,20 @@ style "default"
 widget_class "*" style "default"
 EndOfText
 =end
+
+$fact_a = 0.0256
+$fact_b = -28.084
+
+def hex2temp(a)
+# return (a*0.0256-28.084).round(2)
+  b = (a*$fact_a+$fact_b).round(2)
+  return (b>0) ? b:0.00
+end
+
+def temp2hex(a)
+# return ((a+28.084)/0.0256).to_i
+  return ((a-$fact_b)/$fact_a).to_i
+end
 
 $act_hash_ppm = {
   0x11 => 'Init.',
@@ -442,6 +457,7 @@ class SelProject
       $main_form.file_gpio   = "#{Prjs[$main_form.prj_no]}/gpio#{Kakuchou_si}"
       $main_form.file_config = "#{Prjs[$main_form.prj_no]}/config#{Kakuchou_si}"
       $main_form.file_action = "#{Prjs[$main_form.prj_no]}/action"
+      $main_form.file_ana    = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
 
       # 画面更新
       $main_form.show
@@ -451,6 +467,23 @@ class SelProject
       # モータレジスタの初期化
       motor_reg_init
       dcmotor_reg_init
+
+      # 分析機ファイルから呼び出して表示する
+      if File.exist?( $main_form.file_ana )
+        open( $main_form.file_ana, 'r' ) do |f|
+          while line = f.gets
+            ary = line.chop.split(/=/)
+            case ary[0]
+            when 'ana_no'
+             #@enSerial.set_text( ary[1] ) if ary[1]
+            when 'fact_a'
+              $fact_a = ary[1].to_f if ary[1]
+            when 'fact_b'
+              $fact_b = ary[1].to_f if ary[1]
+            end
+          end
+        end
+      end
     end
     @dialog.destroy
   end
@@ -2635,7 +2668,7 @@ end
 # Main画面
 class Gtn
 
-  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_tim, :time_st, :main_goline, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action
+  attr_accessor :prj_no, :console_opened, :enPrj, :name, :start, :stop, :status, :main_sts, :main_tim, :time_st, :main_goline, :main_info, :file_tnet, :file_ppm, :file_dcm, :file_config, :file_gpio, :file_action, :file_ana
 
   def initialize( size )
 #    @prj_no = 1
@@ -3099,6 +3132,9 @@ Gtk.timeout_add( 200 ) do
 
     # ベース画面のステータス表示
     if my_no == 0 && dsp == 1 && msg
+      if /(.*)℃/ =~ msg.force_encoding("UTF-8")
+        msg.gsub!(/(.*)℃/, "#{hex2temp($1.to_i)}℃")
+      end
       $main_form.main_info.set_text( msg )
     end
 
