@@ -14,9 +14,12 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj11", "#{BasePrm}/prj12", "#{BasePrm}/prj13", "#{BasePrm}/prj14", "#{BasePrm}/prj15",
         "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
 File_ana = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
+Led_conf = "#{ENV['HOME']}/Desktop/LED設定.txt"
 
 $fact_a = 0.0256
 $fact_b = -28.084
+
+$led_conf = File.exist?(Led_conf) ? IO.readlines(Led_conf) : []
 
 def hex2temp(a)
 # return (a*0.0256-28.084).round(2)
@@ -29,7 +32,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :time_st
+  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :time_st, :entLED, :cbOnOff
 
   def initialize
     @spi = WiringPiSpi.new
@@ -228,6 +231,13 @@ Gtk.timeout_add( 1000 ) do
   # 経過時刻表示
   tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")
+
+#p [__LINE__, w.lblTime.text, $led_conf[0]]
+  if ($led_conf[0] && w.lblTime.text >= $led_conf[0].split(/\s/)[0])
+    value = $led_conf.shift.split(/\s+/)[1]
+    w.entLED.set_text(value)
+    w.cbOnOff.active = (value.to_i>0) ? true:false
+  end
 
   if ($count%3) == 0
     # 温度制御SV
