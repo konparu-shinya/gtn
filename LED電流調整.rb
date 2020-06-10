@@ -16,10 +16,10 @@ Prjs = [ "#{BasePrm}",
 File_ana = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
 Led_conf = "#{ENV['HOME']}/Desktop/LED設定.txt"
 
+$led_conf = []
+
 $fact_a = 0.0256
 $fact_b = -28.084
-
-$led_conf = File.exist?(Led_conf) ? IO.readlines(Led_conf) : []
 
 def hex2temp(a)
 # return (a*0.0256-28.084).round(2)
@@ -32,13 +32,14 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :time_st, :entLED, :cbOnOff
+  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :time_st, :time_st2, :entLED, :cbOnOff
 
   def initialize
     @spi = WiringPiSpi.new
     @spi.setup_mode(1000000, 3)
 
-    @time_st = Time.now
+    @time_st  = Time.now
+    @time_st2 = nil
 
     win = Gtk::Window.new()
     win.title= "LED電流調整"
@@ -60,6 +61,9 @@ class Window
     @cbOnOff  = Gtk::CheckButton.new('LED ON')
     @lblCount = Gtk::Label.new("-");
     @lblTime  = Gtk::Label.new("-");
+    btnSt     = Gtk::Button.new('START')
+    btnStp    = Gtk::Button.new('STOP')
+    @lblTm2   = Gtk::Label.new("-");
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
     @entTMP.set_text("40")
@@ -114,7 +118,7 @@ class Window
 
     @entLED.signal_connect('changed') do 
       i = @entLED.text.to_i
-      @scrl.set_value(i) if i>0
+      @scrl.set_value(i)
     end
 
     @scrl.signal_connect('value-changed') do 
@@ -133,6 +137,17 @@ class Window
       set_led_value(@cbOnOff.active?)
     end
 
+    btnSt.signal_connect('clicked') do 
+      $led_conf = File.exist?(Led_conf) ? IO.readlines(Led_conf) : []
+      @time_st2 = Time.now
+    end
+
+    btnStp.signal_connect('clicked') do 
+      $led_conf = []
+      @time_st2 = nil
+      @lblTm2.set_text("-");
+    end
+
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
     tbl.attach_defaults(lblLED,     0, 2, 0, 1)
@@ -145,14 +160,17 @@ class Window
     tbl.attach_defaults(@cbOnOff,   2, 4, 2, 3)
     tbl.attach_defaults(@lblCount,  4, 6, 2, 3)
     tbl.attach_defaults(@lblTime,   6, 8, 2, 3)
-    tbl.attach_defaults(lblTMP,     0, 2, 3, 4)
-    tbl.attach_defaults(@entTMP,    2, 5, 3, 4)
-    tbl.attach_defaults(lblDo,      5, 6, 3, 4)
-    tbl.attach_defaults(@lblTVal,   6, 7, 3, 4)
-    tbl.attach_defaults(lblTMPCfga, 0, 2, 5, 6)
-    tbl.attach_defaults(@entTMPCfga,2, 5, 5, 6)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2, 6, 7)
-    tbl.attach_defaults(@entTMPCfgb,2, 5, 6, 7)
+    tbl.attach_defaults(btnSt,      4, 6, 3, 4)
+    tbl.attach_defaults(btnStp,     4, 6, 4, 5)
+    tbl.attach_defaults(@lblTm2,    6, 8, 3, 4)
+    tbl.attach_defaults(lblTMP,     0, 2, 6, 7)
+    tbl.attach_defaults(@entTMP,    2, 5, 6, 7)
+    tbl.attach_defaults(lblDo,      5, 6, 6, 7)
+    tbl.attach_defaults(@lblTVal,   6, 7, 6, 7)
+    tbl.attach_defaults(lblTMPCfga, 0, 2, 8, 9)
+    tbl.attach_defaults(@entTMPCfga,2, 5, 8, 9)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2, 9, 10)
+    tbl.attach_defaults(@entTMPCfgb,2, 5, 9, 10)
     win.add(tbl)
     win.show_all()
 
@@ -217,6 +235,7 @@ end
 w = Window.new
 
 $count = 0
+$over  = 0
 Gtk.timeout_add( 1000 ) do
   $count += 1
 #p [__LINE__, $count]
@@ -226,14 +245,31 @@ Gtk.timeout_add( 1000 ) do
   style = Gtk::Style.new
   style.set_fg(Gtk::STATE_NORMAL, ((ary[3]&0x02)==0x02)?65535:0, 0, 0)
   w.lblTime.style = style
+  if ((ary[3]&0x02)==0x02)
+    $over += 1
+	# 過大光連続検知でSTOP
+	if $over >= 5
+      $led_conf = []
+      w.time_st2 = nil
+      w.lblTm2.set_text("過大光検知");
+      w.cbOnOff.active = false
+	end
+  else
+    $over = 0
+  end
   # gtnactionからフォトンカウント値を取得
   w.lblCount.set_text("#{w.spi.foton_count}")
   # 経過時刻表示
   tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")
+  if w.time_st2
+    tim = Time.at(Time.at(Time.now - w.time_st2).getutc)
+    w.lblTm2.set_text("#{tim.strftime('%H:%M:%S')}")
+  end
 
 #p [__LINE__, w.lblTime.text, $led_conf[0]]
-  if ($led_conf[0] && w.lblTime.text >= $led_conf[0].split(/\s/)[0])
+  # LED設定ファイルに従いLEDの設定値を変更する
+  if ($led_conf[0] && w.lblTm2.text >= $led_conf[0].split(/\s/)[0])
     value = $led_conf.shift.split(/\s+/)[1]
     w.entLED.set_text(value)
     w.cbOnOff.active = (value.to_i>0) ? true:false
