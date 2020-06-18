@@ -183,9 +183,16 @@ class Window
     @entLED.set_text("#{value}")
 
     # LED OFFの場合は0にする
-    value = 0 if active == false
+#   value = 0 if active == false
 #p [__LINE__, "%02X %02X" % [0x80|((@scrl.value.floor>>6)&0x3f), 0xc0|(@scrl.value.floor&0x3f)]]
 p [__LINE__, @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
+
+    # チェックボックスが外されたらレジスタ2をOFFにする
+    if active == false
+#p [__LINE__, @spi.dataRW([0x22,0x40,0x80,0xc0])]
+    else
+#p [__LINE__, @spi.dataRW([0x22,0x40,0x80,0xc0|0x03])]
+    end
   end
 
   def set_temp_value
@@ -270,9 +277,11 @@ Gtk.timeout_add( 1000 ) do
 #p [__LINE__, w.lblTime.text, $led_conf[0]]
   # LED設定ファイルに従いLEDの設定値を変更する
   if ($led_conf[0] && w.lblTm2.text >= $led_conf[0].split(/\s/)[0])
-    value = $led_conf.shift.split(/\s+/)[1]
+    ary = $led_conf.shift.split(/\s+/)
+    value = ary[2]
     w.entLED.set_text(value)
-    w.cbOnOff.active = (value.to_i>0) ? true:false
+#   w.cbOnOff.active = (value.to_i>0) ? true:false
+    w.cbOnOff.active = (ary[1] == 'OFF') ? false:true
   end
 
   if ($count%3) == 0
