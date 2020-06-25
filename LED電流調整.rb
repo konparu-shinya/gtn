@@ -180,7 +180,7 @@ class Window
     @time_st = Time.now
 
     value = @scrl.value.floor
-    @entLED.set_text("#{value}")
+    @entLED.set_text("#{value}") if @entLED.text.to_i != value
 
     # LED電流セット
     @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
