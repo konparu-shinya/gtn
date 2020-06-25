@@ -79,6 +79,11 @@ class Window
     @entTMPCfga.set_xalign(1)
     @entTMPCfgb.set_text("#{$fact_b}")
     @entTMPCfgb.set_xalign(1)
+    lblGT      = Gtk::Label.new("ゲートタイム");
+    @entGT     = Gtk::Entry.new
+    @entGT.set_text("10")
+    @entGT.set_xalign(1)
+    lblGTUnit  = Gtk::Label.new("msec");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -96,6 +101,8 @@ class Window
           when 'fact_b'
             @entTMPCfgb.set_text("#{ary[1]}") if ary[1]
             $fact_b = @entTMPCfgb.text.to_f
+          when 'gate_time'
+            @entGT.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
@@ -103,6 +110,7 @@ class Window
 
     set_led_value(false)
     set_temp_value
+    @spi.gate_time(@entGT.text.to_i)
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
@@ -148,6 +156,11 @@ class Window
       @lblTm2.set_text("-");
     end
 
+    @entGT.signal_connect('changed') do 
+      i = @entGT.text.to_i
+      @spi.gate_time(i)
+    end
+
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
     tbl.attach_defaults(lblLED,     0, 2, 0, 1)
@@ -171,6 +184,10 @@ class Window
     tbl.attach_defaults(@entTMPCfga,2, 5, 8, 9)
     tbl.attach_defaults(lblTMPCfgb, 0, 2, 9, 10)
     tbl.attach_defaults(@entTMPCfgb,2, 5, 9, 10)
+    tbl.attach_defaults(lblGT,      0, 2,11, 12)
+    tbl.attach_defaults(@entGT,     2, 5,11, 12)
+    tbl.attach_defaults(lblGTUnit,  5, 6,11, 12)
+
     win.add(tbl)
     win.show_all()
 
@@ -202,7 +219,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -222,6 +239,9 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'fact_b'
         fw << "fact_b=#{$fact_b}\n"
         set_flag[3] = true
+      when 'gate_time'
+        fw << "gate_time=#{@entGT.text.to_i}\n"
+        set_flag[4] = true
       else
         fw << line
       end
@@ -231,6 +251,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "temp_sv=#{@entTMP.text.to_i}\n" if set_flag[1] == nil
     fw << "fact_a=#{$fact_a}\n" if set_flag[2] == nil
     fw << "fact_b=#{$fact_b}\n" if set_flag[3] == nil
+    fw << "gate_time=#{@entGT.text.to_i}\n" if set_flag[4] == nil
     fw.close
 
     Gtk.main_quit()

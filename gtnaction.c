@@ -32,6 +32,9 @@
 #include "wiringPi.h"
 #include "wiringPiSPI.h"
 
+// フォトンカウントのゲート補正
+#define GATE_COUNT(a) ((long)((double)a*((double)shm->gate_time/10.0)))
+
 // ヒーター温度
 #define TARGET_TEMP		40.0
 //#define	HEX2TEMP(a)	((double)(a)*0.0263-29.061)
@@ -46,6 +49,7 @@ static int	temp=TEMP2HEX(0);
 struct _shm {
 	pthread_mutex_t mutex;	// ミューテックス
 	long	count;			// フォトンカウント値
+	long	gate_time;		// ゲートタイムmsec
 } static *shm;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
@@ -512,7 +516,7 @@ static long get_1st_data(char buf[])
 			}
 		}
 	}
-	return total/m;
+	return GATE_COUNT(total/m);
 }
 
 // カウント値をファイルに保存する
@@ -564,7 +568,7 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 				}
 			}
 //			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
-			fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?total/m:0L);
+			fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
 		}
 		fclose(fp);
 		ret=0;
@@ -1359,6 +1363,7 @@ static int mutex_init(void)
 
 		pthread_mutex_init(&shm->mutex, &mat);
 		shm->count=0L;
+		shm->gate_time=10L;
 	}
 	/* 既に起動済 */
 	else{
