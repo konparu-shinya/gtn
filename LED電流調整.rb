@@ -182,16 +182,14 @@ class Window
     value = @scrl.value.floor
     @entLED.set_text("#{value}")
 
-    # LED OFFの場合は0にする
-#   value = 0 if active == false
-#p [__LINE__, "%02X %02X" % [0x80|((@scrl.value.floor>>6)&0x3f), 0xc0|(@scrl.value.floor&0x3f)]]
-p [__LINE__, @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
+    # LED電流セット
+    @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
 
     # チェックボックスが外されたらレジスタ2をOFFにする
     if active == false
-p [__LINE__, @spi.dataRW([0x22,0x40,0x80,0xc0])]
+      @spi.dataRW([0x22,0x40,0x80,0xc0])
     else
-p [__LINE__, @spi.dataRW([0x22,0x40,0x80,0xc0|0x03])]
+      @spi.dataRW([0x22,0x40,0x80,0xc0|0x03])
     end
   end
 
@@ -254,13 +252,13 @@ Gtk.timeout_add( 1000 ) do
   w.lblTime.style = style
   if ((ary[3]&0x02)==0x02)
     $over += 1
-	# 過大光連続検知でSTOP
-	if $over >= 5
+    # 過大光連続検知でSTOP
+    if $over >= 5
       $led_conf = []
       w.time_st2 = nil
       w.lblTm2.set_text("過大光検知");
       w.cbOnOff.active = false
-	end
+    end
   else
     $over = 0
   end
