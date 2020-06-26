@@ -113,6 +113,7 @@ struct _seq_tbl {
 // カウント管理テーブル
 struct _cnt_tbl {
 	int	busy;					// 1:カウント取込み中
+	int mode;					// 0:10ms生データ出力 1:1secごとのファイル出力
 	int n;						// 取り込んだデータ数
 	int	sec;					// カウント取り込み秒数表示
 	int	times;					// カウント取り込み秒数
@@ -124,7 +125,7 @@ struct _cnt_tbl {
 	char str_start[32];			// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
 	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
-} static cnt_tbl={0, 0};
+} static cnt_tbl={0, 0, 0};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -543,6 +544,10 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 					for (k=0; k<=3; k++) {
 						dat += (cnt_tbl.buf[i][j+k]&0x1f) << (5*k);
 					}
+					// 10ms生データ出力
+					if (cnt_tbl.mode==0) {
+						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+					}
 					// min以上max以下の値の平均値を1秒間の測定値とする
 					if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
 						total += dat;
@@ -567,8 +572,11 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0);
 				}
 			}
-//			fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
-			fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
+			// 1secごとのファイル出力
+			if (cnt_tbl.mode==1) {
+//				fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
+			}
 		}
 		fclose(fp);
 		ret=0;
@@ -842,9 +850,11 @@ static int sequence(int sock, int fd, int no)
         }
 		break;
 	case 0x71:		// カウント取り込み
+	case 0x72:		// カウント取り込み(10msec)
 		if (fd>-1) {
 			time_t t = time(NULL);
 			cnt_tbl.busy     =1;
+			cnt_tbl.mode     =(pact->act==0x71)?1:0;
 			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
@@ -865,7 +875,7 @@ static int sequence(int sock, int fd, int no)
 		}
 		pseq->current++;
 		break;
-	case 0x72:		// カウント取り込み終了まち
+	case 0x73:		// カウント取り込み終了まち
 		if (cnt_tbl.busy==0) {
 			pseq->current++;
 		}
