@@ -295,7 +295,7 @@ Gtk.timeout_add( 1000 ) do
 
 #p [__LINE__, w.lblTime.text, $led_conf[0]]
   # LED設定ファイルに従いLEDの設定値を変更する
-  if ($led_conf[0] && w.lblTm2.text >= $led_conf[0].split(/\s/)[0])
+  if ($led_conf[0] && $led_conf[0] != "\n" && w.lblTm2.text >= $led_conf[0].split(/\s/)[0])
     ary = $led_conf.shift.split(/\s+/)
     value = ary[2]
     w.entLED.set_text(value)
