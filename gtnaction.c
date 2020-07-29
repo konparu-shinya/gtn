@@ -113,7 +113,7 @@ struct _seq_tbl {
 // カウント管理テーブル
 struct _cnt_tbl {
 	int	busy;					// 1:カウント取込み中
-	int mode;					// 0:10ms生データ出力 1:1secごとのファイル出力
+	int mode;					// 0:10ms生データ出力 1:1secごとのファイル出力 2:10msecフィルタデータ出力
 	int n;						// 取り込んだデータ数
 	int	sec;					// カウント取り込み秒数表示
 	int	times;					// カウント取り込み秒数
@@ -523,6 +523,9 @@ static long get_1st_data(char buf[])
 // カウント値をファイルに保存する
 static int count_save(char *str)
 {
+const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
+	unsigned long dat_bk1=0L, dat_bk2=0L;
+	double e1=0.0, e2=0.0;
 	int ret=-1;
 	int i, j, k;
 	FILE *fp;
@@ -547,6 +550,15 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 					// 10ms生データ出力
 					if (cnt_tbl.mode==0) {
 						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+					}
+					// 10msecフィルタデータ出力
+					else if (cnt_tbl.mode==2) {
+						double e = f22*(double)e1 + f12*(double)e2 + f21*(double)dat_bk1 + f11*(double)dat_bk2;
+						fprintf(fp, "%4d,%10.3lf\r\n", i+1, e);
+						dat_bk2=dat_bk1;
+						dat_bk1=dat;
+						e2 = e1;
+						e1 = e;
 					}
 					// min以上max以下の値の平均値を1秒間の測定値とする
 					if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
@@ -851,10 +863,21 @@ static int sequence(int sock, int fd, int no)
 		break;
 	case 0x71:		// カウント取り込み
 	case 0x72:		// カウント取り込み(10msec)
+	case 0x73:		// カウント取込(フィルタ)
 		if (fd>-1) {
 			time_t t = time(NULL);
 			cnt_tbl.busy     =1;
-			cnt_tbl.mode     =(pact->act==0x71)?1:0;
+			switch (pact->act) {
+			case 0x71: // カウント取込み',
+				cnt_tbl.mode = 1;
+				break;
+			case 0x72: // カウント取込(10ms)',
+				cnt_tbl.mode = 0;
+				break;
+			case 0x73: // カウント取込(フィルタ)',
+				cnt_tbl.mode = 2;
+				break;
+			}
 			cnt_tbl.n 	     =0;
 			cnt_tbl.sec      =0;
 			cnt_tbl.times    =pact->move_pulse;
@@ -875,7 +898,7 @@ static int sequence(int sock, int fd, int no)
 		}
 		pseq->current++;
 		break;
-	case 0x73:		// カウント取り込み終了まち
+	case 0x74:		// カウント取り込み終了まち
 		if (cnt_tbl.busy==0) {
 			pseq->current++;
 		}
