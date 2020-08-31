@@ -10,9 +10,11 @@ Gtk.init
 
 VER = '12.0-gtk2'
 
-#MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp"
-#MailTo = "konparus@alice.aandt.co.jp"
-MailTo = nil
+#MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp, kuboi@alice.aandt.co.jp, munakatay@alice.aandt.co.jp"
+#MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp
+MailTo = "konparus@alice.aandt.co.jp"
+#MailTo = "kuboi@alice.aandt.co.jp"
+#MailTo = nil
 
 
 # 環境
@@ -125,7 +127,8 @@ $act_hash_evt = {
 $act_hash_adc = {
   0x71 => 'カウント取込み',
   0x72 => 'カウント取込(10ms)',
-  0x73 => 'カウント取込終了待ち'
+  0x73 => 'カウント取込(フィルタ)',
+  0x74 => 'カウント取込終了待ち'
 }
 
 $act_hash_mp3 = {
