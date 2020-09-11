@@ -64,6 +64,28 @@ class Window
     btnSt     = Gtk::Button.new('START')
     btnStp    = Gtk::Button.new('STOP')
     @lblTm2   = Gtk::Label.new("-");
+
+    lblGT      = Gtk::Label.new("ゲートタイム");
+    @entGT     = Gtk::Entry.new
+    @entGT.set_text("10")
+    @entGT.set_xalign(1)
+    lblGTUnit  = Gtk::Label.new("msec");
+    lblLED_ON  = Gtk::Label.new("LED点灯時間");
+    @entLED_ON = Gtk::Entry.new
+    @entLED_ON.set_text("30")
+    @entLED_ON.set_xalign(1)
+    lblUnit1   = Gtk::Label.new("0.1msec(0-99)");
+    lblDelay   = Gtk::Label.new("ディレイ時間");
+    @entDelay  = Gtk::Entry.new
+    @entDelay.set_text("5")
+    @entDelay.set_xalign(1)
+    lblUnit2   = Gtk::Label.new("0.1msec(0-99)");
+    lblCntTime = Gtk::Label.new("カウント時間");
+    @entCntTime = Gtk::Entry.new
+    @entCntTime.set_text("10")
+    @entCntTime.set_xalign(1)
+    lblUnit3   = Gtk::Label.new("0.1msec(0-99)");
+
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
     @entTMP.set_text("40")
@@ -79,11 +101,6 @@ class Window
     @entTMPCfga.set_xalign(1)
     @entTMPCfgb.set_text("#{$fact_b}")
     @entTMPCfgb.set_xalign(1)
-    lblGT      = Gtk::Label.new("ゲートタイム");
-    @entGT     = Gtk::Entry.new
-    @entGT.set_text("10")
-    @entGT.set_xalign(1)
-    lblGTUnit  = Gtk::Label.new("msec");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -103,12 +120,20 @@ class Window
             $fact_b = @entTMPCfgb.text.to_f
           when 'gate_time'
             @entGT.set_text("#{ary[1]}") if ary[1]
+          when 'led_on_tm'
+            @entLED_ON.set_text("#{ary[1]}") if ary[1]
+          when 'led_delay'
+            @entDelay.set_text("#{ary[1]}") if ary[1]
+          when 'count_tm'
+            @entCntTime.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
     end
 
-    set_led_value(false)
+    set_led_value
+    set_led_config
+    set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
 
@@ -130,7 +155,7 @@ class Window
     end
 
     @scrl.signal_connect('value-changed') do 
-      set_led_value(@cbOnOff.active?)
+      set_led_value
     end
 
     lbtn.signal_connect('clicked') do 
@@ -142,7 +167,19 @@ class Window
     end
 
     @cbOnOff.signal_connect('clicked') do 
-      set_led_value(@cbOnOff.active?)
+      set_led_on_off(@cbOnOff.active?)
+    end
+
+    @entLED_ON.signal_connect('changed') do 
+      set_led_config
+    end
+
+    @entDelay.signal_connect('changed') do 
+      set_led_config
+    end
+
+    @entCntTime.signal_connect('changed') do 
+      set_led_config
     end
 
     btnSt.signal_connect('clicked') do 
@@ -176,35 +213,46 @@ class Window
     tbl.attach_defaults(btnSt,      4, 6, 3, 4)
     tbl.attach_defaults(btnStp,     4, 6, 4, 5)
     tbl.attach_defaults(@lblTm2,    6, 8, 3, 4)
-    tbl.attach_defaults(lblTMP,     0, 2, 6, 7)
-    tbl.attach_defaults(@entTMP,    2, 5, 6, 7)
-    tbl.attach_defaults(lblDo,      5, 6, 6, 7)
-    tbl.attach_defaults(@lblTVal,   6, 7, 6, 7)
-    tbl.attach_defaults(lblTMPCfga, 0, 2, 8, 9)
-    tbl.attach_defaults(@entTMPCfga,2, 5, 8, 9)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2, 9, 10)
-    tbl.attach_defaults(@entTMPCfgb,2, 5, 9, 10)
-    tbl.attach_defaults(lblGT,      0, 2,11, 12)
-    tbl.attach_defaults(@entGT,     2, 5,11, 12)
-    tbl.attach_defaults(lblGTUnit,  5, 6,11, 12)
+
+    tbl.attach_defaults(lblGT,      0, 2, 6, 7)
+    tbl.attach_defaults(@entGT,     2, 5, 6, 7)
+    tbl.attach_defaults(lblGTUnit,  5, 6, 6, 7)
+    tbl.attach_defaults(lblLED_ON,  0, 2, 7, 8)
+    tbl.attach_defaults(@entLED_ON, 2, 5, 7, 8)
+    tbl.attach_defaults(lblUnit1,   5, 7, 7, 8)
+    tbl.attach_defaults(lblDelay,   0, 2, 8, 9)
+    tbl.attach_defaults(@entDelay,  2, 5, 8, 9)
+    tbl.attach_defaults(lblUnit2,   5, 7, 8, 9)
+    tbl.attach_defaults(lblCntTime, 0, 2, 9,10)
+    tbl.attach_defaults(@entCntTime,2, 5, 9,10)
+    tbl.attach_defaults(lblUnit3,   5, 7, 9,10)
+
+    tbl.attach_defaults(lblTMP,     0, 2,11,12)
+    tbl.attach_defaults(@entTMP,    2, 5,11,12)
+    tbl.attach_defaults(lblDo,      5, 6,11,12)
+    tbl.attach_defaults(@lblTVal,   6, 7,11,12)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,12,13)
+    tbl.attach_defaults(@entTMPCfga,2, 5,12,13)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,13,14)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,13,14)
 
     win.add(tbl)
     win.show_all()
 
   end
 
-  def set_led_value(active)
-    @time_st = Time.now
-
+  def set_led_value
     value = @scrl.value.floor
     @entLED.set_text("#{value}") if @entLED.text.to_i != value
-
     # LED電流セット
     @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
+  end
+
+  def set_led_on_off(active)
+    @time_st = Time.now
 
     # チェックボックスが外されたらレジスタ2をOFFにする
     rd = @spi.dataRW([0x2,0x40,0x80,0xc0])
-p [__LINE__, rd]
     if active == false
       @spi.dataRW([0x22,rd[1],rd[2],rd[3]&~0x01])
 #@spi.dataRW([0x22,0x40,0x80,0xc0])
@@ -213,6 +261,19 @@ p [__LINE__, rd]
 #@spi.dataRW([0x22,0x40,0x80,0xc0|0x03])
     end
 p [__LINE__, @spi.dataRW([0x2,0x40,0x80,0xc0])]
+
+  end
+
+  def set_led_config
+    # LED点灯開始
+    value = @entLED_ON.text.to_i + @entDelay.text.to_i + @entCntTime.text.to_i
+    @spi.dataRW([0x31,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
+    # LED消灯開始
+    value = @entDelay.text.to_i + @entCntTime.text.to_i
+    @spi.dataRW([0x32,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
+         # カウント時間
+    value = @entCntTime.text.to_i
+    @spi.dataRW([0x30,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
   end
 
   def set_temp_value
@@ -247,6 +308,15 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'gate_time'
         fw << "gate_time=#{@entGT.text.to_i}\n"
         set_flag[4] = true
+      when 'led_on_tm'
+        fw << "led_on_tm=#{@entLED_ON.text.to_i}\n"
+        set_flag[5] = true
+      when 'led_delay'
+        fw << "led_delay=#{@entDelay.text.to_i}\n"
+        set_flag[6] = true
+      when 'count_tm'
+        fw << "count_tm=#{@entCntTime.text.to_i}\n"
+        set_flag[7] = true
       else
         fw << line
       end
@@ -257,6 +327,9 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "fact_a=#{$fact_a}\n" if set_flag[2] == nil
     fw << "fact_b=#{$fact_b}\n" if set_flag[3] == nil
     fw << "gate_time=#{@entGT.text.to_i}\n" if set_flag[4] == nil
+    fw << "led_on_tm=#{@entLED_ON.text.to_i}\n" if set_flag[5] == nil
+    fw << "led_delay=#{@entDelay.text.to_i}\n" if set_flag[6] == nil
+    fw << "count_tm=#{@entCntTime.text.to_i}\n" if set_flag[7] == nil
     fw.close
 
     Gtk.main_quit()
@@ -316,6 +389,9 @@ Gtk.timeout_add( 1000 ) do
     # 温度
     ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
     w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
+    # LED ON/OFF
+    ary = w.spi.dataRW([0x2,0x40,0x80,0xc0])
+    w.cbOnOff.active = ((ary[3]&0x01)==0) ? false:true
     # LED制御SV
     ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
     w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
