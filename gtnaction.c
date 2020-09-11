@@ -924,6 +924,39 @@ static int sequence(int sock, int fd, int no)
 		}
 		pseq->current++;
 		break;
+	case 0x91:		// LED ON
+	    // LED電流セット
+		{
+			unsigned char data[4]={0x28,0x40,0x80|((pact->move_pulse>>6)&0x3f), 0xc0|(pact->move_pulse&0x3f)};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		{
+			unsigned char data[4]={0x2,0x40,0x80,0xc0};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+	        // レジスタ2をONにする
+			data[0]=0x22;
+			data[3]=data[3]|0x01;
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
+	case 0x92:		// LED OFF
+		{
+			unsigned char data[4]={0x2,0x40,0x80,0xc0};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+	        // レジスタ2をOFFにする
+			data[0]=0x22;
+			data[3]=data[3]&~0x01;
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
 	default:
 		pseq->current++;
 		break;

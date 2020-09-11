@@ -137,6 +137,11 @@ $act_hash_mp3 = {
   0x83 => '音声3'
 }
 
+$act_hash_led = {
+  0x91 => 'LED ON',
+  0x92 => 'LED OFF'
+}
+
 def b2d( str )
   h = 0
   ( 1..str.size ).each do |i|
@@ -349,6 +354,8 @@ def action_info_send(console_no, ary)
     cmd[13] = ary[8].to_i>>16  # 最高速(max 32bit)
   when "MP3"
     cmd[8] = $act_hash_mp3.key(ary[5]) if $act_hash_mp3.key(ary[5])
+  when "LED"
+    cmd[8] = $act_hash_led.key(ary[5]) if $act_hash_led.key(ary[5])
   end
   $sock_port.nt_send( cmd, 'C4n2C2nNn8C2' )
 end
@@ -1830,6 +1837,23 @@ class Input
     table4_7.attach( @spnBtnMax,                       4, 5, 3, 4 )
     table4_7.attach( btnMWrite,                        0, 5, 4, 5 )
 
+    # Edit LED new
+    @edtLComment    = Gtk::Entry.new()
+    @cmbLAction     = Gtk::Combo.new()
+    spnAdjustLED    = Gtk::Adjustment.new( 0, 0, 0xfff, 1, 2, 0 )
+    @spnBtnLED      = Gtk::SpinButton.new( spnAdjustLED, 0, 0 )
+    btnLWrite       = Gtk::Button.new( '書込み' )
+
+    # Edit LED 配置
+    table4_8 = Gtk::Table.new( 3, 4, false )
+    table4_8.attach( Gtk::Label.new( CommentTitle ),   0, 5, 0, 1 )
+    table4_8.attach( @edtLComment,                     0, 5, 1, 2 )
+    table4_8.attach( Gtk::Label.new( "Action" ),       0, 3, 2, 3 )
+    table4_8.attach( Gtk::Label.new( "電流値" ),       3, 4, 2, 3 )
+    table4_8.attach( @cmbLAction,                      0, 3, 3, 4 )
+    table4_8.attach( @spnBtnLED,                       3, 4, 3, 4 )
+    table4_8.attach( btnLWrite,                        0, 4, 4, 5 )
+
     # Notebook
     @nbook = Gtk::Notebook.new()
     @nbook.append_page( table4_1,  Gtk::Label.new( ' PPM ' ) )
@@ -1839,6 +1863,7 @@ class Input
     @nbook.append_page( table4_5,  Gtk::Label.new( ' SIO ' ) )
     @nbook.append_page( table4_6,  Gtk::Label.new( ' Event ' ) )
     @nbook.append_page( table4_7,  Gtk::Label.new( ' A/D ' ) )
+    @nbook.append_page( table4_8,  Gtk::Label.new( ' LED ' ) )
 
     # Edit Line new
     spnAdjustLine = Gtk::Adjustment.new( 1, 1, 9999, 1, 2, 0 )
@@ -1898,6 +1923,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     btnMP3Write.signal_connect( 'clicked' ){ mp3_write_clicked }
     btnEWrite.signal_connect( 'clicked' ){ event_write_clicked }
     btnMWrite.signal_connect( 'clicked' ){ meas_write_clicked }
+    btnLWrite.signal_connect( 'clicked' ){ led_write_clicked }
     btnGo.signal_connect( 'clicked' ){ go_clicked }
     btnStop.signal_connect( 'clicked' ){ stop_clicked }
     btnStep.signal_connect( 'clicked' ){ step_clicked }
@@ -1911,6 +1937,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @cmbDAction.set_popdown_strings( $act_hash_dio.values )
     @cmbEAction.set_popdown_strings( $act_hash_evt.values )
     @cmbMAction.set_popdown_strings( $act_hash_adc.values )
+    @cmbLAction.set_popdown_strings( $act_hash_led.values )
     @cmbComAction.set_popdown_strings( [CancelSt, CancelEd] )
     @cmbMP3Action.set_popdown_strings( $act_hash_mp3.values )
 
@@ -1996,6 +2023,7 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
     @edtMP3Comment.set_text( iter.get_value(1) )
     @edtEComment.set_text( iter.get_value(1) )
     @edtMComment.set_text( iter.get_value(1) )
+    @edtLComment.set_text( iter.get_value(1) )
 
     case iter.get_value(2)
     when "PPM"
@@ -2078,6 +2106,10 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
       @spnBtnMin.set_value( iter.get_value(6).to_i )
       @spnBtnMax.set_value( iter.get_value(7).to_i )
       @nbook.set_page( 6 )
+    when "LED"
+      @cmbLAction.entry.set_text( iter.get_value(4) )
+      @spnBtnLED.set_value( iter.get_value(5).to_i )
+      @nbook.set_page( 7 )
     end
 
     # 行番号
@@ -2395,6 +2427,23 @@ msg = '※実行範囲は、開始行をクリックし、終了行はShiftを�
             "#{@spnBtnMin.value_as_int}",
             "#{@spnBtnMax.value_as_int}",
             "-", "-", "-", "-", "-", "-" ]
+    clist_write( fmt )
+    # ステータスクリア
+    clear_status
+
+    @clist_change = true
+  end
+
+  # LED書込み
+  def led_write_clicked
+    fmt = [ "%4d" % [ @spnBtnLine.value_as_int ],
+            "#{@edtLComment.text}", 
+            'LED',
+            '',
+            '',
+            "#{@cmbLAction.entry.text}", 
+            "#{@spnBtnLED.value_as_int}",
+            "-", "-", "-", "-", "-", "-", "-", "-" ]
     clist_write( fmt )
     # ステータスクリア
     clear_status
