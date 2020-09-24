@@ -102,6 +102,11 @@ class Window
     @entTMPCfgb.set_text("#{$fact_b}")
     @entTMPCfgb.set_xalign(1)
 
+    lblPumpCfg  = Gtk::Label.new("ポンプ設定");
+    @entPumpCfg = Gtk::Entry.new
+    @entPumpCfg.set_text("50")
+    @entPumpCfg.set_xalign(1)
+
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
       open( File_ana, 'r' ) do |f|
@@ -126,6 +131,8 @@ class Window
             @entDelay.set_text("#{ary[1]}") if ary[1]
           when 'count_tm'
             @entCntTime.set_text("#{ary[1]}") if ary[1]
+          when 'pump'
+            @entPumpCfg.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
@@ -136,6 +143,9 @@ class Window
     set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
+    # pump
+    value = @entPumpCfg.text.to_i
+    @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
@@ -198,6 +208,12 @@ class Window
       @spi.gate_time(i)
     end
 
+    @entPumpCfg.signal_connect('changed') do 
+      # pump
+      value = @entPumpCfg.text.to_i
+      @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+    end
+
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
     tbl.attach_defaults(lblLED,     0, 2, 0, 1)
@@ -235,6 +251,9 @@ class Window
     tbl.attach_defaults(@entTMPCfga,2, 5,12,13)
     tbl.attach_defaults(lblTMPCfgb, 0, 2,13,14)
     tbl.attach_defaults(@entTMPCfgb,2, 5,13,14)
+
+    tbl.attach_defaults(lblPumpCfg, 0, 2,15,16)
+    tbl.attach_defaults(@entPumpCfg,2, 5,15,16)
 
     win.add(tbl)
     win.show_all()
@@ -285,7 +304,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -317,6 +336,9 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'count_tm'
         fw << "count_tm=#{@entCntTime.text.to_i}\n"
         set_flag[7] = true
+      when 'pump'
+        fw << "pump=#{@entPumpCfg.text.to_i}\n"
+        set_flag[8] = true
       else
         fw << line
       end
@@ -330,6 +352,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "led_on_tm=#{@entLED_ON.text.to_i}\n" if set_flag[5] == nil
     fw << "led_delay=#{@entDelay.text.to_i}\n" if set_flag[6] == nil
     fw << "count_tm=#{@entCntTime.text.to_i}\n" if set_flag[7] == nil
+    fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
     fw.close
 
     Gtk.main_quit()
