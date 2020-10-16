@@ -705,6 +705,26 @@ static int sequence(int sock, int fd, int no)
 		L6470_write(pact->mno-1, 0xB0);	// SoftStop
 		pseq->current++;
 		break;
+	case 0x19:		// パルスモーター低速Step
+		if (!L6470_busy(pact->mno-1)) {
+			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x50:0x51;
+			L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+			L6470_cmd_write(pact->mno-1, cmd, 3, pact->max_pulse);//Run
+		}
+		pseq->current++;
+		break;
+	case 0x1a:		// パルスモーター低速Home
+		if (!L6470_busy(pact->mno-1)) {
+			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x50:0x51;
+			L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+			L6470_cmd_write(pact->mno-1, cmd, 3, pact->max_pulse);//Run
+		}
+		pseq->current++;
+		break;
+	case 0x1b:		// パルスモーターSTOP
+		L6470_write(pact->mno-1, 0xB8);	// HardStop
+		pseq->current++;
+		break;
 //	case 0x31:		// パルスモーターI/O指定ビットON
 //	case 0x32:		// パルスモーターI/O指定ビットOFF
 //	case 0x33:		// パルスモーターI/O指定ビットをONまでまつ
