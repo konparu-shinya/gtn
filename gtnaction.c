@@ -146,7 +146,8 @@ struct _action_tbl {
 
 // パルスモーター管理テーブル
 struct _ppm_ctrl {
-	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby
+	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby 0x10:低速駆動中
+	long move_pulse;		// 低速ドライブ時の移動パルス数
 	int	ratio;
 	struct _init_pulse {
 		int	init;
@@ -330,6 +331,16 @@ static long L6470_param_read(unsigned char ch, unsigned char no)
 static int L6470_busy(unsigned char ch)
 {
 	return ((L6470_param_read(ch, 0x19)&0x02) == 0x00)?1:0;
+}
+
+// L6470 ABS位置をunsigned型で得る
+static unsigned long L6470_abs_pos(unsigned char ch)
+{
+	unsigned long abs_pos=L6470_param_read(ch, 0x01);
+	if (abs_pos&0x200000) {
+		return (~(abs_pos|0xffc00000))+1;
+	}
+	return abs_pos;
 }
 
 // L6470 初期設定
@@ -652,34 +663,51 @@ static int sequence(int sock, int fd, int no)
 		break;
 	case 0x12:		// パルスモーターSTEP(相対パルス指定)
 		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x40:0x41;
-			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
-//			delay(10);
+			if (pact->max_pulse>=15) {
+				unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x40:0x41;
+				L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
+				L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
+			}
+			// 低速ドライブ
+			else{
+				struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+				unsigned char cmd = (pctrl->dir.step)?0x50:0x51;
+				unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+				pctrl->move_pulse = abs_pos+(long)pact->move_pulse;
+				pctrl->driving    = 0x10;
+				L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+				L6470_cmd_write(pact->mno-1, cmd, 3, (long)((double)pact->max_pulse*(250*pow(10,-9))/(pow(2,-28))));//Run
+			}
 			pseq->current++;
 		}
 		break;
 	case 0x13:		// パルスモーターHOME(相対パルス指定)
 		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
-			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
-//			delay(10);
+			if (pact->max_pulse>=15) {
+				unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
+				L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
+				L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
+			}
+			// 低速ドライブ
+			else{
+				struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+				unsigned char cmd = (pctrl->dir.home)?0x50:0x51;
+				unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+				pctrl->move_pulse = abs_pos-(long)pact->move_pulse;
+				pctrl->driving    = 0x11;
+				L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+				L6470_cmd_write(pact->mno-1, cmd, 3, (long)((double)pact->max_pulse*(250*pow(10,-9))/(pow(2,-28))));//Run
+			}
 			pseq->current++;
 		}
 		break;
 	case 0x14:		// パルスモーターHOME(現在位置パルス分をCCW回転する)
 		if (!L6470_busy(pact->mno-1)) {
 			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
-			long abs_pos=L6470_param_read(pact->mno-1, 0x01);
+			unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
 			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
 			//L6470_write(pact->mno-1, 0x70);//GoHome
-			if (abs_pos&0x3fffff) {
-				L6470_cmd_write(pact->mno-1, cmd, 3, (~(abs_pos|0xffc00000))+1);//Move
-			}
-			else{
-				L6470_cmd_write(pact->mno-1, cmd, 3, abs_pos);//Move
-			}
+			L6470_cmd_write(pact->mno-1, cmd, 3, abs_pos);//Move
 //			delay(10);
 			pseq->current++;
 		}
@@ -693,7 +721,21 @@ static int sequence(int sock, int fd, int no)
 		}
 		break;
 	case 0x16:		// パルスモーター停止までまつ
-		if (!L6470_busy(pact->mno-1)) {
+		if (ppm_ctrl[pact->mno-1].driving==0x10 || ppm_ctrl[pact->mno-1].driving==0x11) {
+			struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+			unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+			// STEP
+			if (ppm_ctrl[pact->mno-1].driving==0x10 && pctrl->move_pulse<=abs_pos) {
+				L6470_write(pact->mno-1, 0xB8);	// HardStop
+				pseq->current++;
+			}
+			// HOME
+			else if (ppm_ctrl[pact->mno-1].driving==0x11 && pctrl->move_pulse>=abs_pos) {
+				L6470_write(pact->mno-1, 0xB8);	// HardStop
+				pseq->current++;
+			}
+		}
+		else if (!L6470_busy(pact->mno-1)) {
 			pseq->current++;
 		}
 		break;
@@ -703,26 +745,6 @@ static int sequence(int sock, int fd, int no)
 		break;
 	case 0x18:		// パルスモーター励磁ON
 		L6470_write(pact->mno-1, 0xB0);	// SoftStop
-		pseq->current++;
-		break;
-	case 0x19:		// パルスモーター低速Step
-		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x50:0x51;
-			L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->max_pulse);//Run
-		}
-		pseq->current++;
-		break;
-	case 0x1a:		// パルスモーター低速Home
-		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x50:0x51;
-			L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->max_pulse);//Run
-		}
-		pseq->current++;
-		break;
-	case 0x1b:		// パルスモーターSTOP
-		L6470_write(pact->mno-1, 0xB8);	// HardStop
 		pseq->current++;
 		break;
 //	case 0x31:		// パルスモーターI/O指定ビットON
@@ -1101,6 +1123,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	if (id==0xC101 && run_flag==0) {
 		unsigned char no = (unsigned char)buf[7];
 		struct _ppm_ctrl *pctrl = &ppm_ctrl[no-1];
+		pctrl->move_pulse          = 0;
 		pctrl->ratio               = ((int)((unsigned char)buf[10])<<8) + (int)((unsigned char)buf[11]);
 		pctrl->init_pulse.init     = ((int)((unsigned char)buf[ 8])<<8) + (int)((unsigned char)buf[ 9]);
 		pctrl->init_pulse.home_out = ((int)((unsigned char)buf[12])<<8) + (int)((unsigned char)buf[13]);
