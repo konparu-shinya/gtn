@@ -726,11 +726,13 @@ static int sequence(int sock, int fd, int no)
 			unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
 			// STEP
 			if (ppm_ctrl[pact->mno-1].driving==0x10 && pctrl->move_pulse<=abs_pos) {
+				pctrl->driving=0;
 				L6470_write(pact->mno-1, 0xB8);	// HardStop
 				pseq->current++;
 			}
 			// HOME
 			else if (ppm_ctrl[pact->mno-1].driving==0x11 && pctrl->move_pulse>=abs_pos) {
+				pctrl->driving=0;
 				L6470_write(pact->mno-1, 0xB8);	// HardStop
 				pseq->current++;
 			}
