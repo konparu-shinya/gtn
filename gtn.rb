@@ -139,7 +139,9 @@ $act_hash_mp3 = {
 
 $act_hash_led = {
   0x91 => 'LED ON',
-  0x92 => 'LED OFF'
+  0x92 => 'LED OFF',
+  0x93 => 'ポンプOFF',
+  0x94 => 'ポンプ吐出'
 }
 
 def b2d( str )
