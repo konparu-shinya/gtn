@@ -1001,6 +1001,33 @@ static int sequence(int sock, int fd, int no)
 		}
 		pseq->current++;
 		break;
+	case 0x93:		// ポンプOFF
+		{
+			unsigned char data[4]={0x2f,0x40+0x00,0x80,0xc0};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
+	case 0x94:		// ポンプ吐出
+		// まずSTOP
+		{
+			unsigned char data[4]={0x2f,0x41,0x80,0xc0};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		usleep(1000);
+		// 次に吐出	
+		{
+			unsigned char data[4]={0x2f,0x43,0x80|((pact->move_pulse>>6)&0x3f), 0xc0|(pact->move_pulse&0x3f)};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
 	default:
 		pseq->current++;
 		break;
