@@ -977,7 +977,7 @@ static int sequence(int sock, int fd, int no)
 		usleep(1000);
 		// 次に吐出	
 		{
-			unsigned char data[4]={0x2f,0x43,0x80|((pact->move_pulse>>6)&0x3f), 0xc0|(pact->move_pulse&0x3f)};
+			unsigned char data[4]={0x2f,0x43,0x87, 0xc0|(pact->move_pulse&0x3f)};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
