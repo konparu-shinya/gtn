@@ -932,11 +932,13 @@ static int sequence(int sock, int fd, int no)
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
 		}
+        // 励起光をONにする
 		{
+        	// まずレジスタ2を読込む
 			unsigned char data[4]={0x2,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-	        // レジスタ2をONにする
+        	// レジスタ2へONを書込む
 			data[0]=0x22;
 			data[3]=data[3]|0x01;
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
@@ -945,11 +947,13 @@ static int sequence(int sock, int fd, int no)
 		pseq->current++;
 		break;
 	case 0x92:		// LED OFF
+        // 励起光をOFFにする
 		{
+        	// まずレジスタ2を読込む
 			unsigned char data[4]={0x2,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-	        // レジスタ2をOFFにする
+        	// レジスタ2へOFFを書込む
 			data[0]=0x22;
 			data[3]=data[3]&~0x01;
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);

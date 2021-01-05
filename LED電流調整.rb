@@ -403,7 +403,7 @@ Gtk.timeout_add( 1000 ) do
     value = ary[2]
     w.entLED.set_text(value)
 #   w.cbOnOff.active = (value.to_i>0) ? true:false
-    w.cbOnOff.active = (ary[1] == 'OFF') ? false:true
+    w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true
   end
 
   if ($count%3) == 0
@@ -416,7 +416,7 @@ Gtk.timeout_add( 1000 ) do
     w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
     # LED ON/OFF
     ary = w.spi.dataRW([0x2,0x40,0x80,0xc0])
-    w.cbOnOff.active = ((ary[3]&0x01)==0) ? false:true
+    w.cbOnOff.active = ((ary[3]&0x01)==0 || $over>=5) ? false:true
     # LED制御SV
     ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
     w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
