@@ -143,7 +143,7 @@ class Window
     set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
-    # pump
+    # pump on/off
     value = @entPumpCfg.text.to_i
     @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
 
@@ -209,7 +209,7 @@ class Window
     end
 
     @entPumpCfg.signal_connect('changed') do 
-      # pump
+      # pump on/off
       value = @entPumpCfg.text.to_i
       @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
     end
@@ -267,6 +267,7 @@ class Window
     @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
   end
 
+  # LED ON/OFF
   def set_led_on_off(active)
     @time_st = Time.now
 
@@ -286,17 +287,18 @@ p [__LINE__, @spi.dataRW([0x2,0x40,0x80,0xc0])]
   end
 
   def set_led_config
-    # LED点灯開始
+    # LED点灯開始設定
     value = @entLED_ON.text.to_i + @entDelay.text.to_i + @entCntTime.text.to_i
     @spi.dataRW([0x31,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
-    # LED消灯開始
+    # LED消灯開始設定
     value = @entDelay.text.to_i + @entCntTime.text.to_i
     @spi.dataRW([0x32,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
-         # カウント時間
+    # カウント時間設定
     value = @entCntTime.text.to_i
     @spi.dataRW([0x30,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
   end
 
+  # 制御温度設定
   def set_temp_value
     value = @entTMP.text.to_i
     @entTMP.set_text("#{value}")
@@ -406,6 +408,7 @@ Gtk.timeout_add( 1000 ) do
     w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true
   end
 
+  # FPGAの状態読み出し
   if ($count%3) == 0
     # 温度制御SV
 #   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
@@ -424,7 +427,7 @@ Gtk.timeout_add( 1000 ) do
     ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
     w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
     # errorの場合はリセットコマンドを発行する
-    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+    # w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
   end
   true
 end
