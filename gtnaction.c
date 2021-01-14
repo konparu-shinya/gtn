@@ -1,7 +1,7 @@
 /********************************************************************************
  * gtn for ラズパイ のAction実行部
  *  パルスモーターコントローラー:L6470
- *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15)
+ *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15) CS3:GPIO23(pin16)
  *      R 9の設定:StepMode
  *      R10の設定:b15-b8:KVAL_HOLD b7-b0:KVAL_RUN/KVAL_ACC/KVAL_DEC
  *  DIO
@@ -61,7 +61,8 @@ struct _shm {
 #define	GPIO17	17
 #define	GPIO27	27
 #define	GPIO22	22
-const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
+#define	GPIO23	23
+const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, GPIO23, 0};
 // IN/OUT
 #define	GPIO2	2
 #define	GPIO3	3
