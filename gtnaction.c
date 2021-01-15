@@ -75,7 +75,7 @@ const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
-#define	PPM_MAX	3
+#define	PPM_MAX	4
 
 #define ACK		0x06
 #define NAK		0x15
