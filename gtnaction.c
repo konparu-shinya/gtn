@@ -508,9 +508,10 @@ static void count_dev_rcv(void)
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 		pthread_mutex_unlock(&shm->mutex);
-//printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
 		// データが有効なら取り込む(データが有効になるのは10msecごと)
 		if (data[0]&0x02) {
+//printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
+//printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f);
 			// エラー発生
 			if (data[0]&0x20) {
 				unsigned char data2[4]={0x1f,0x40,0x80,0xc0};
@@ -529,13 +530,13 @@ static void count_dev_rcv(void)
 				data[3] = 0xff;
 			}
 			// キャリー
-			else if (data[2]&0x08) {
+			else if (data[0]&0x08) {
 				data[1] = 0x7f;
 				data[2] = 0xbf;
 				data[3] = 0xfe;
 			}
 			// オーバーフロー
-			else if (data[2]&0x04) {
+			else if (data[0]&0x04) {
 				data[1] = 0x7f;
 				data[2] = 0xbf;
 				data[3] = 0xfd;
@@ -594,6 +595,7 @@ static int count_dev_read(char *ptr, int len)
 	int n=0;
 	while (len>0 && cnt_dev_tbl.n>0) {
 		*ptr++ = cnt_dev_tbl.buf[cnt_dev_tbl.rd];
+//printf("%s %d %4d %02X %d\n", __FILE__, __LINE__, len, cnt_dev_tbl.buf[cnt_dev_tbl.rd]&0x3f, cnt_dev_tbl.rd);
 		cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
 		cnt_dev_tbl.n--;
 		n++;
@@ -619,6 +621,7 @@ static long get_1st_data(char buf[])
 //				dat += (buf[j+k+1]&0x3f) << (6*k);
 				dat += (buf[j+k+1]&0x3f) << (6*(3-1-k));
 			}
+//printf("%s %d %4d %4d %8d %08X %02X %02X %02X\n", __FILE__, __LINE__, m, j, dat, dat, (buf[j+1]&0x3f), (buf[j+2]&0x3f), (buf[j+3]&0x3f));
 			total += dat;
 			m++;
 			j+=4;
