@@ -1425,13 +1425,10 @@ static int execute(int sock)
             if (flag) {
     			unsigned char data[4]={0x06,0x40,0x80,0xc0};
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-		    	// OK
-			    if (data[0]==1) {
-				//  temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
-				    temp = (((data[2]&0x3f)<<6) + (data[3]&0x3f));
-    			}
+				//temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+				temp = (((data[2]&0x3f)<<6) + (data[3]&0x3f));
 	    		// ERR
-		    	else if (data[0]==0x20) {
+		    	if (data[0]&0x20) {
 			    	unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
 				    wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
                 }
