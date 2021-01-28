@@ -32,7 +32,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :time_st, :time_st2, :entLED, :cbOnOff
+  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff
 
   def initialize
     @spi = WiringPiSpi.new
@@ -64,6 +64,7 @@ class Window
     btnSt     = Gtk::Button.new('START')
     btnStp    = Gtk::Button.new('STOP')
     @lblTm2   = Gtk::Label.new("-");
+    @lblErr   = Gtk::Label.new("");
 
     lblGT      = Gtk::Label.new("ゲートタイム");
     @entGT     = Gtk::Entry.new
@@ -229,6 +230,7 @@ class Window
     tbl.attach_defaults(btnSt,      4, 6, 3, 4)
     tbl.attach_defaults(btnStp,     4, 6, 4, 5)
     tbl.attach_defaults(@lblTm2,    6, 8, 3, 4)
+    tbl.attach_defaults(@lblErr,    6, 8, 4, 5)
 
     tbl.attach_defaults(lblGT,      0, 2, 6, 7)
     tbl.attach_defaults(@entGT,     2, 5, 6, 7)
@@ -276,7 +278,7 @@ class Window
     if active == false
       @spi.dataRW([0x22,rd[1],rd[2],rd[3]&~0x01])
     else
-	  # LED電流がゼロであればセットする
+      # LED電流がゼロであればセットする
       ary = @spi.dataRW([0x08,0x40,0x80,0xc0])
       set_led_value if (ary[2]&~0x80)==0 && (ary[3]&~0xc0)==0
 
@@ -382,11 +384,23 @@ Gtk.timeout_add( 1000 ) do
     if $over >= 5
       $led_conf = []
       w.time_st2 = nil
-      w.lblTm2.set_text("過大光検知");
+      style = Gtk::Style.new
+      style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+      w.lblErr.style = style
+      w.lblErr.set_text("過大光検知");
       w.cbOnOff.active = false
     end
   else
     $over = 0
+  end
+  # 通信エラー
+  if (ary[0]==0 && ary[1]==0 && ary[2]==0 && ary[3]==0)
+    style = Gtk::Style.new
+    style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+    w.lblErr.style = style
+    w.lblErr.set_text("通信エラー");
+  elsif $over < 5
+    w.lblErr.set_text("");
   end
   # gtnactionからフォトンカウント値を取得
   w.lblCount.set_text("#{w.spi.foton_count}")
