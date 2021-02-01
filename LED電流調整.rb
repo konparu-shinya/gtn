@@ -367,10 +367,10 @@ end
 
 w = Window.new
 
-$count = 0
+$count = [0, 1, 2, 3, 4]
 $over  = 0
 Gtk.timeout_add( 1000 ) do
-  $count += 1
+  $count.map!{ |c| c+=1 }
 #p [__LINE__, $count]
 
   # 過大光は赤色で
@@ -393,6 +393,9 @@ Gtk.timeout_add( 1000 ) do
   else
     $over = 0
   end
+  # errorの場合はリセットコマンドを発行する
+  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+
   # 通信エラー
   if (ary[0]==0 && ary[1]==0 && ary[2]==0 && ary[3]==0)
     style = Gtk::Style.new
@@ -402,6 +405,7 @@ Gtk.timeout_add( 1000 ) do
   elsif $over < 5
     w.lblErr.set_text("");
   end
+
   # gtnactionからフォトンカウント値を取得
   w.lblCount.set_text("#{w.spi.foton_count}")
   # 経過時刻表示
@@ -422,26 +426,34 @@ Gtk.timeout_add( 1000 ) do
     w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true
   end
 
-  # FPGAの状態読み出し
-  if ($count%3) == 0
-    # 温度制御SV
-#   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
-#   p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+  # 温度制御SV
+  if false
+    ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
+    p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+  end
 
-    # 温度
+  # 温度
+  if ($count[1]%5) == 0
     ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
-    w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}")
-    # LED ON/OFF
+    w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
+  end
+
+  # LED ON/OFF
+  if ($count[2]%5) == 0
     ary = w.spi.dataRW([0x2,0x40,0x80,0xc0])
     w.cbOnOff.active = ((ary[3]&0x01)==0 || $over>=5) ? false:true
-    # LED制御SV
+  end
+
+  # LED制御SV
+  if ($count[3]%5) == 0
     ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
-    w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}")
-    # LED電流
+    w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
+  end
+
+  # LED電流
+  if ($count[4]%5) == 0
     ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
-    w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}")
-    # errorの場合はリセットコマンドを発行する
-    # w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
+    w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
   end
   true
 end
