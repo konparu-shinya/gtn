@@ -126,6 +126,7 @@ struct _cnt_tbl {
 	int max;					// カウントMax値
 	time_t t;					// カウント取込み開始
 	struct timespec tim_start;	// カウント取込み開始
+	struct timespec tim_trig;	// カウント取込みトリガ
 	char str_start[32];			// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
 	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
@@ -537,21 +538,27 @@ static void count_dev_rcv(void)
 			}
 			// オーバーフロー
 			else if (data[0]&0x04) {
+//printf("%s %d %8d %8d %10d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_bk.tv_sec, tim_now.tv_sec, tim_bk.tv_nsec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
 				data[1] = 0x7f;
 				data[2] = 0xbf;
 				data[3] = 0xfd;
 			}
-			cnt_dev_tbl.buf[cnt_dev_tbl.wr+0]=data[0];
-			cnt_dev_tbl.buf[cnt_dev_tbl.wr+1]=data[1];
-			cnt_dev_tbl.buf[cnt_dev_tbl.wr+2]=data[2];
-			cnt_dev_tbl.buf[cnt_dev_tbl.wr+3]=data[3];
 
-			cnt_dev_tbl.wr = (cnt_dev_tbl.wr+4)%CNT_DEV_SZ;
+			// エラーがない場合に取り込む
+			if ((data[0]&0x2C)==0) {
+//printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
+				cnt_dev_tbl.buf[cnt_dev_tbl.wr+0]=data[0];
+				cnt_dev_tbl.buf[cnt_dev_tbl.wr+1]=data[1];
+				cnt_dev_tbl.buf[cnt_dev_tbl.wr+2]=data[2];
+				cnt_dev_tbl.buf[cnt_dev_tbl.wr+3]=data[3];
 
-			cnt_dev_tbl.n  += 4;
-			if (cnt_dev_tbl.n>CNT_DEV_SZ) {
-				cnt_dev_tbl.rd = (cnt_dev_tbl.rd+4)%CNT_DEV_SZ;
-				cnt_dev_tbl.n  = CNT_DEV_SZ;
+				cnt_dev_tbl.wr = (cnt_dev_tbl.wr+4)%CNT_DEV_SZ;
+
+				cnt_dev_tbl.n  += 4;
+				if (cnt_dev_tbl.n>CNT_DEV_SZ) {
+					cnt_dev_tbl.rd = (cnt_dev_tbl.rd+4)%CNT_DEV_SZ;
+					cnt_dev_tbl.n  = CNT_DEV_SZ;
+				}
 			}
 		}
 		// 次回の5msec後
@@ -1014,6 +1021,8 @@ static int sequence(int sock, int no)
 
 			cnt_tbl.t = t;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
+			cnt_tbl.tim_trig=cnt_tbl.tim_start;
+			cnt_tbl.tim_trig.tv_sec+=1;
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
 		pseq->current++;
@@ -1119,6 +1128,25 @@ static int sequence(int sock, int no)
 		long sec;
 		struct timespec tim_now;
 //		int n;
+		clock_gettime(CLOCK_MONOTONIC, &tim_now);
+		if((tim_now.tv_nsec - cnt_tbl.tim_trig.tv_nsec) < 0){
+			tim_now.tv_nsec += 1000000000;
+			tim_now.tv_sec  -= 1;
+		}
+		if (tim_now.tv_sec>=cnt_tbl.tim_trig.tv_sec && tim_now.tv_nsec>=cnt_tbl.tim_trig.tv_nsec) {
+			if (cnt_tbl.n<2000) {
+				int n=count_dev_n();
+//printf("%s %d %d %d\n", __FILE__, __LINE__, tim_now.tv_sec, n);
+				count_dev_read(cnt_tbl.buf[cnt_tbl.n], (n<CNT_SZ)?n:CNT_SZ);
+				// 不足分は無効データを挿入する
+				for (i=n; i<CNT_SZ; i++) {
+					cnt_tbl.buf[cnt_tbl.n][i]=0xff;
+				}
+				cnt_tbl.n++;
+			}
+			cnt_tbl.tim_trig.tv_sec+=1;
+		}
+
 		// 経過時間を得る
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if((tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec) < 0){
@@ -1127,13 +1155,6 @@ static int sequence(int sock, int no)
 		}
 		nsec = tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec;
 		sec  = tim_now.tv_sec - cnt_tbl.tim_start.tv_sec;
-
-		if (count_dev_n()>=CNT_SZ) {
-			if (cnt_tbl.n<2000) {
-				count_dev_read(cnt_tbl.buf[cnt_tbl.n], CNT_SZ);
-				cnt_tbl.n++;
-			}
-		}
 
 		// 取り込み終了判定(取り込み開始ディレイがあるので+1まで取り込む)
 		if ((cnt_tbl.times+1) <= sec) {
