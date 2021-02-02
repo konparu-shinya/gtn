@@ -497,6 +497,26 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// tmにaddを加算する
+struct timespec tim_add(struct timespec tm, long addmsec)
+{
+	tm.tv_nsec += ((addmsec%1000)*1000000);
+	if (tm.tv_nsec>=1000000000) {
+		tm.tv_sec += 1;
+		tm.tv_nsec -= 1000000000;
+	}
+	tm.tv_sec += (addmsec/1000);
+	return tm;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
+// 戻値 1:TimeUP
+static int tim_diff(struct timespec t1, struct timespec t2, long msec)
+{
+	struct timespec tm = tim_add(t2, msec);
+	return (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec)?1:0;
+}
+
 // フォトンカウント取り込み 5msec周期に取り込む
 static void count_dev_rcv(void)
 {
@@ -504,13 +524,14 @@ static void count_dev_rcv(void)
 	int over_led=0;
 	// 5msec毎にフォトンカウント取り込み
 	clock_gettime(CLOCK_MONOTONIC, &tim_now);
-	if (tim_now.tv_sec>=cnt_dev_tbl.exec_tim.tv_sec && tim_now.tv_nsec>=cnt_dev_tbl.exec_tim.tv_nsec) {
+	if (tim_diff(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data[4]={0x14,0x40,0x80,0xc0};
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 		pthread_mutex_unlock(&shm->mutex);
 		// データが有効なら取り込む(データが有効になるのは10msecごと)
 		if (data[0]&0x02) {
+//printf("%s %d %8d %8d %10d %10d\n", __FILE__, __LINE__, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f);
 			// エラー発生
@@ -561,12 +582,8 @@ static void count_dev_rcv(void)
 				}
 			}
 		}
-		// 次回の5msec後
-		cnt_dev_tbl.exec_tim.tv_nsec += 5000000;
-		if (cnt_dev_tbl.exec_tim.tv_nsec>=1000000000) {
-			cnt_dev_tbl.exec_tim.tv_sec += 1;
-			cnt_dev_tbl.exec_tim.tv_nsec -= 1000000000;
-		}
+		// 次回5msec後
+		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 5);
 	}
 }
 
@@ -588,6 +605,7 @@ static void count_dev_reset(void)
 	cnt_dev_tbl.rd = 0;
 	cnt_dev_tbl.wr = 0;
 	cnt_dev_tbl.n  = 0;
+	clock_gettime(CLOCK_MONOTONIC, &cnt_dev_tbl.exec_tim);
 }
 
 // フォトンカウント取り込みバッファ取り込み数
@@ -1129,11 +1147,7 @@ static int sequence(int sock, int no)
 		struct timespec tim_now;
 //		int n;
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if((tim_now.tv_nsec - cnt_tbl.tim_trig.tv_nsec) < 0){
-			tim_now.tv_nsec += 1000000000;
-			tim_now.tv_sec  -= 1;
-		}
-		if (tim_now.tv_sec>=cnt_tbl.tim_trig.tv_sec && tim_now.tv_nsec>=cnt_tbl.tim_trig.tv_nsec) {
+		if (tim_diff(tim_now, cnt_tbl.tim_trig, 1000)) {
 			if (cnt_tbl.n<2000) {
 				int n=count_dev_n();
 //printf("%s %d %d %d\n", __FILE__, __LINE__, tim_now.tv_sec, n);
@@ -1144,7 +1158,7 @@ static int sequence(int sock, int no)
 				}
 				cnt_tbl.n++;
 			}
-			cnt_tbl.tim_trig.tv_sec+=1;
+			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_trig, 1000);
 		}
 
 		// 経過時間を得る
@@ -1402,9 +1416,8 @@ static int execute(int sock)
 	struct timespec tim_last, tim_last2, tim_now;
 
 	count_dev_reset();
-	clock_gettime(CLOCK_MONOTONIC, &cnt_dev_tbl.exec_tim);
-	tim_last=cnt_dev_tbl.exec_tim;
-	tim_last2=cnt_dev_tbl.exec_tim;
+	clock_gettime(CLOCK_MONOTONIC, &tim_last);
+	tim_last2=tim_last;
 
 	while (len!=0) {
 
@@ -1425,6 +1438,8 @@ static int execute(int sock)
 			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
 			// コマンド割り振り
 			dispatch(sock, buf);
+			// コマンド受け取るごとにリセット
+			count_dev_reset();
 		}
 
 		// シーケンス
