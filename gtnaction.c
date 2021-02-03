@@ -356,6 +356,8 @@ static int L6470_init(unsigned char ch)
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
 	L6470_write(ch, 0xc0);	// Reset
+	L6470_write(ch, 0xc0);	// Reset
+	L6470_write(ch, 0xc0);	// Reset
 	L6470_write(ch, 0xA8);	// HardHiZ
 
 	// MIN_SPEED設定。
@@ -720,7 +722,7 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 				}
 				// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
 				else{
-printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
+//printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
 					for (j=j+1; j<CNT_SZ; j++) {
 						if ((cnt_tbl.buf[i][j]&cnt_head[7])==cnt_head[0]) {
 							l=0;
@@ -731,7 +733,7 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_h
 							break;
 						}
 					}
-printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
+//printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
 				}
 			}
 			// 1secごとのファイル出力
