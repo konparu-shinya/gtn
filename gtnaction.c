@@ -194,6 +194,10 @@ static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 static struct timespec tim_start;
 
+static void count_dev_rcv(void);
+
+
+
 // CRC計算
 static unsigned char calc_crc(char *sbuf, int size)
 {
@@ -287,6 +291,9 @@ static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
 		c = digitalRead(GPIO19)&0x01;
 		(*data) += (c<<(7-i));
 		delay(1);
+
+		// フォトンカウント取り込み
+		count_dev_rcv();
 	}
 }
 
