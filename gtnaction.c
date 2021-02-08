@@ -531,7 +531,7 @@ static void count_dev_rcv(void)
 {
 	struct timespec tim_now;
 	int over_led=0;
-	// 5msec毎にフォトンカウント取り込み
+	// 10msec毎にフォトンカウント取り込み
 	clock_gettime(CLOCK_MONOTONIC, &tim_now);
 	if (tim_diff(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data[4]={0x14,0x40,0x80,0xc0};
@@ -591,8 +591,8 @@ static void count_dev_rcv(void)
 				}
 			}
 		}
-		// 次回5msec後
-		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 5);
+		// 次回10msec後
+		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
 	}
 }
 
@@ -745,8 +745,8 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-//				fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
-				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
+				fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+//				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
 			}
 		}
 		fclose(fp);
@@ -1048,8 +1048,7 @@ static int sequence(int sock, int no)
 
 			cnt_tbl.t = t;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
-			cnt_tbl.tim_trig=cnt_tbl.tim_start;
-			cnt_tbl.tim_trig.tv_sec+=1;
+			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_start, 1000);
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
 		pseq->current++;
@@ -1129,7 +1128,7 @@ static int sequence(int sock, int no)
 	case 0x94:		// ポンプ吐出
 		// まずSTOP
 		{
-			unsigned char data[4]={0x2f,0x41,0x80,0xc0};
+			unsigned char data[4]={0x2f,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
@@ -1137,7 +1136,16 @@ static int sequence(int sock, int no)
 		usleep(1000);
 		// 次に吐出	
 		{
-			unsigned char data[4]={0x2f,0x43,0x87, 0xc0|(pact->move_pulse&0x3f)};
+			unsigned char data[4]={0x2f,0x42,0x87, 0xc0|(pact->move_pulse&0x3f)};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
+	case 0x95:		// ポンプ連続
+		{
+			unsigned char data[4]={0x2f,0x41,0x87, 0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
@@ -1156,7 +1164,7 @@ static int sequence(int sock, int no)
 		struct timespec tim_now;
 //		int n;
 		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if (tim_diff(tim_now, cnt_tbl.tim_trig, 1000)) {
+		if (tim_diff(tim_now, cnt_tbl.tim_trig, 0)) {
 			if (cnt_tbl.n<2000) {
 				int n=count_dev_n();
 //printf("%s %d %d %d\n", __FILE__, __LINE__, tim_now.tv_sec, n);
@@ -1486,16 +1494,19 @@ static int execute(int sock)
             }
 			pthread_mutex_unlock(&shm->mutex);
 
-			// カウント取り込みが非動作であればここでデータを取り込む
-			if (cnt_tbl.busy==0) {
-				if (count_dev_n()>=CNT_SZ) {
-					count_dev_read(buf, CNT_SZ);
-					shm->count=get_1st_data(buf);
-				}
-			}
-
 			// 1秒ごとに表示
 			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
+				// カウント取り込みが非動作であればここでデータを取り込む
+				if (cnt_tbl.busy==0) {
+					int n=count_dev_n();
+					count_dev_read(buf, (n<CNT_SZ)?n:CNT_SZ);
+					// 不足分は無効データを挿入する
+					for (i=n; i<CNT_SZ; i++) {
+						cnt_tbl.buf[cnt_tbl.n][i]=0xff;
+					}
+					shm->count=get_1st_data(buf);
+				}
+
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
 				sprintf(str, "%d℃   %ld", temp, shm->count);
 				message(sock, 0, 1, 1, str);

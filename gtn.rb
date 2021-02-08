@@ -53,6 +53,8 @@ CancelEd = '=無効終了'
 
 ADDevFile = '/dev/adm686z'
 
+$ana_no = '0'
+
 $sio_dev = Array.new( 20, nil )
 #$fd_ad   = nil
 #$ad_log  = nil
@@ -141,7 +143,8 @@ $act_hash_led = {
   0x91 => 'LED ON',
   0x92 => 'LED OFF',
   0x93 => 'ポンプOFF',
-  0x94 => 'ポンプ吐出'
+  0x94 => 'ポンプ吐出',
+  0x95 => 'ポンプ連続'
 }
 
 def b2d( str )
@@ -488,7 +491,7 @@ class SelProject
             ary = line.chop.split(/=/)
             case ary[0]
             when 'ana_no'
-             #@enSerial.set_text( ary[1] ) if ary[1]
+              $ana_no = ary[1] if ary[1]
             when 'fact_a'
               $fact_a = ary[1].to_f if ary[1]
             when 'fact_b'
@@ -3304,11 +3307,12 @@ Gtk.timeout_add( 200 ) do
       if msg =~ /FILE/
         file = msg.split(/\s/)[-1]
         name = msg.split(/\//)[-1]
+
         # gmail送信
         gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
         gmail.deliver do
           to MailTo
-          subject "測定レポート:#{name}"
+          subject "#{$ana_no}号機 測定レポート:#{name}"
           #text_part do
           #  body "本文"
           #end
