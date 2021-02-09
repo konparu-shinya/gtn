@@ -126,10 +126,11 @@ struct _cnt_tbl {
 	int max;					// カウントMax値
 	time_t t;					// カウント取込み開始
 	struct timespec tim_start;	// カウント取込み開始
-	struct timespec tim_trig;	// カウント取込みトリガ
+//	struct timespec tim_trig;	// カウント取込みトリガ
 	char str_start[32];			// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
-	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
+	char buf[2000*CNT_SZ];		// 2000秒のデータバッファ
+	time_t	tm[2000*CNT_SZ];	// 取込み時刻
 } static cnt_tbl={0, 0, 0};
 
 // フォトンカウント取り込みバッファテーブル
@@ -140,6 +141,7 @@ struct _cnt_dev_tbl {
 	int	n;						// 受信数
 #define	CNT_DEV_SZ	800
 	char buf[CNT_DEV_SZ];		// 2秒分のデータバッファ
+	time_t	tm[CNT_DEV_SZ];		// 取込み時刻
 } static cnt_dev_tbl={{0,0}, 0, 0, 0};
 
 // 動作シーケンス格納テーブル
@@ -532,17 +534,18 @@ static void count_dev_rcv(void)
 	struct timespec tim_now;
 	int over_led=0;
 	// 10msec毎にフォトンカウント取り込み
-	clock_gettime(CLOCK_MONOTONIC, &tim_now);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
 	if (tim_diff(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data[4]={0x14,0x40,0x80,0xc0};
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 		pthread_mutex_unlock(&shm->mutex);
+//printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 		// データが有効なら取り込む(データが有効になるのは10msecごと)
 		if (data[0]&0x02) {
-//printf("%s %d %8d %8d %10d %10d\n", __FILE__, __LINE__, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
+//printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
-//printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f);
+//printf("%s %d %8d %10d %6d %02X %02X %02X %02X %d\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f, ((data[1]&0x3f)<<12)+((data[2]&0x3f)<<6)+(data[3]&0x3f));
 			// エラー発生
 			if (data[0]&0x20) {
 				unsigned char data2[4]={0x1f,0x40,0x80,0xc0};
@@ -582,6 +585,11 @@ static void count_dev_rcv(void)
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+2]=data[2];
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+3]=data[3];
 
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+0]=tim_now.tv_sec;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+1]=tim_now.tv_sec;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+2]=tim_now.tv_sec;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+3]=tim_now.tv_sec;
+
 				cnt_dev_tbl.wr = (cnt_dev_tbl.wr+4)%CNT_DEV_SZ;
 
 				cnt_dev_tbl.n  += 4;
@@ -614,7 +622,9 @@ static void count_dev_reset(void)
 	cnt_dev_tbl.rd = 0;
 	cnt_dev_tbl.wr = 0;
 	cnt_dev_tbl.n  = 0;
-	clock_gettime(CLOCK_MONOTONIC, &cnt_dev_tbl.exec_tim);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cnt_dev_tbl.exec_tim);
+	cnt_dev_tbl.exec_tim.tv_sec += 1;
+	cnt_dev_tbl.exec_tim.tv_nsec = 0;
 }
 
 // フォトンカウント取り込みバッファ取り込み数
@@ -624,11 +634,12 @@ static int count_dev_n(void)
 }
 
 // フォトンカウント取り込みバッファ読み出し
-static int count_dev_read(char *ptr, int len)
+static int count_dev_read(char *ptr, time_t *tm, int len)
 {
 	int n=0;
 	while (len>0 && cnt_dev_tbl.n>0) {
 		*ptr++ = cnt_dev_tbl.buf[cnt_dev_tbl.rd];
+		*tm++ = cnt_dev_tbl.tm[cnt_dev_tbl.rd];
 //printf("%s %d %4d %02X %d\n", __FILE__, __LINE__, len, cnt_dev_tbl.buf[cnt_dev_tbl.rd]&0x3f, cnt_dev_tbl.rd);
 		cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
 		cnt_dev_tbl.n--;
@@ -639,12 +650,13 @@ static int count_dev_read(char *ptr, int len)
 }
 
 // buf内のカウント値の平均を求める
-static long get_1st_data(char buf[])
+static long get_1st_data(char buf[], int n)
 {
 	unsigned long total=0L;
 	int l=((buf[0]&cnt_head[7])==cnt_head[4])?4:0;
 	int j, k, m;
-	for (j=0, m=0; j<(CNT_SZ-3); ) {
+//printf("%s %d %d\n", __FILE__, __LINE__, n);
+	for (j=0, m=0; j<(n-3); ) {
 		if ((buf[j+0]&cnt_head[7])==cnt_head[l+0] &&
 			(buf[j+1]&cnt_head[7])==cnt_head[l+1] &&
 			(buf[j+2]&cnt_head[7])==cnt_head[l+2] &&
@@ -663,7 +675,8 @@ static long get_1st_data(char buf[])
 		}
 		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
 		else{
-			for (j=j+1; j<CNT_SZ; j++) {
+//printf("%s %d %d %02X\n", __FILE__, __LINE__, j, cnt_tbl.buf[j]&cnt_head[7]);
+			for (j=j+1; j<n; j++) {
 				if ((buf[j]&cnt_head[7])==cnt_head[0]) {
 					l=0;
 					break;
@@ -685,26 +698,27 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	unsigned long dat_bk1=0L, dat_bk2=0L;
 	double e1=0.0, e2=0.0;
 	int ret=-1;
-	int i, j, k;
+	int i, k;
 	FILE *fp;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
-printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
+//printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
 	if (fp) {
-		for (i=0; i<cnt_tbl.n; i++) {
+		for (i=0; i<(cnt_tbl.n-3); ) {
 			unsigned long total=0L;
-			int l=((cnt_tbl.buf[i][0]&cnt_head[7])==cnt_head[4])?4:0;
+			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
+			time_t tm=cnt_tbl.tm[i];
 			int m=0;
-			for (j=0; j<(CNT_SZ-3); ) {
-				if ((cnt_tbl.buf[i][j+0]&cnt_head[7])==cnt_head[l+0] &&
-					(cnt_tbl.buf[i][j+1]&cnt_head[7])==cnt_head[l+1] &&
-					(cnt_tbl.buf[i][j+2]&cnt_head[7])==cnt_head[l+2] &&
-					(cnt_tbl.buf[i][j+3]&cnt_head[7])==cnt_head[l+3]) {
+//printf("%s %d %4d\n", __FILE__, __LINE__, i);
+			while (i<(cnt_tbl.n-3) && tm==cnt_tbl.tm[i]) {
+				if ((cnt_tbl.buf[i+0]&cnt_head[7])==cnt_head[l+0] &&
+					(cnt_tbl.buf[i+1]&cnt_head[7])==cnt_head[l+1] &&
+					(cnt_tbl.buf[i+2]&cnt_head[7])==cnt_head[l+2] &&
+					(cnt_tbl.buf[i+3]&cnt_head[7])==cnt_head[l+3]) {
 					//下3バイトの下位6ビットが測光データ18bits
 					unsigned long dat=0L;
 					for (k=0; k<3; k++) {
-//						dat += (cnt_tbl.buf[i][j+k+1]&0x3f) << (6*k);
-						dat += (cnt_tbl.buf[i][j+k+1]&0x3f) << (6*(3-1-k));
+						dat += (cnt_tbl.buf[i+k+1]&0x3f) << (6*(3-1-k));
 					}
 					// 10ms生データ出力
 					if (cnt_tbl.mode==0) {
@@ -724,18 +738,18 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 						total += dat;
 						m++;
 					}
-					j+=4;
+					i+=4;
 					l = (l+4)%8;
 				}
 				// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
 				else{
-//printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
-					for (j=j+1; j<CNT_SZ; j++) {
-						if ((cnt_tbl.buf[i][j]&cnt_head[7])==cnt_head[0]) {
+printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
+					for (; i<(cnt_tbl.n-3); i++) {
+						if ((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[0]) {
 							l=0;
 							break;
 						}
-						if ((cnt_tbl.buf[i][j]&cnt_head[7])==cnt_head[4]) {
+						if ((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4]) {
 							l=4;
 							break;
 						}
@@ -745,7 +759,7 @@ printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
+				fprintf(fp, "1,%10ld,%d\r\n", (m>0)?(total/m):0L, m);
 //				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
 			}
 		}
@@ -1048,7 +1062,7 @@ static int sequence(int sock, int no)
 
 			cnt_tbl.t = t;
 			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
-			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_start, 1000);
+//			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_start, 1000);
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
 		pseq->current++;
@@ -1162,20 +1176,10 @@ static int sequence(int sock, int no)
 		time_t nsec;
 		long sec;
 		struct timespec tim_now;
-//		int n;
-		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if (tim_diff(tim_now, cnt_tbl.tim_trig, 0)) {
-			if (cnt_tbl.n<2000) {
-				int n=count_dev_n();
-//printf("%s %d %d %d\n", __FILE__, __LINE__, tim_now.tv_sec, n);
-				count_dev_read(cnt_tbl.buf[cnt_tbl.n], (n<CNT_SZ)?n:CNT_SZ);
-				// 不足分は無効データを挿入する
-				for (i=n; i<CNT_SZ; i++) {
-					cnt_tbl.buf[cnt_tbl.n][i]=0xff;
-				}
-				cnt_tbl.n++;
-			}
-			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_trig, 1000);
+		int n=count_dev_n();
+		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
+			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], n);
+			cnt_tbl.n+=n;
 		}
 
 		// 経過時間を得る
@@ -1193,7 +1197,7 @@ static int sequence(int sock, int no)
 		}
 		// 1秒ごとの表示
 		else if (cnt_tbl.sec < sec) {
-			shm->count=(cnt_tbl.n>0)?get_1st_data(cnt_tbl.buf[cnt_tbl.n-1]):0L;
+			shm->count=(cnt_tbl.n>25)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-25], 25):0L;
 			cnt_tbl.sec = sec;
 			sprintf(str, "取込:%lu秒 :%ld", sec, shm->count);
 			message(sock, no, 1, 3, str);
@@ -1429,6 +1433,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 static int execute(int sock)
 {
 	char buf[512], str[32];
+	time_t tm[CNT_SZ];
 	int i, n, len=1;
 	struct timespec tim_last, tim_last2, tim_now;
 
@@ -1499,12 +1504,8 @@ static int execute(int sock)
 				// カウント取り込みが非動作であればここでデータを取り込む
 				if (cnt_tbl.busy==0) {
 					int n=count_dev_n();
-					count_dev_read(buf, (n<CNT_SZ)?n:CNT_SZ);
-					// 不足分は無効データを挿入する
-					for (i=n; i<CNT_SZ; i++) {
-						cnt_tbl.buf[cnt_tbl.n][i]=0xff;
-					}
-					shm->count=get_1st_data(buf);
+					count_dev_read(buf, tm, n);
+					shm->count=get_1st_data(buf, n);
 				}
 
 		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
