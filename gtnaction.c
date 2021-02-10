@@ -136,13 +136,14 @@ struct _cnt_tbl {
 // フォトンカウント取り込みバッファテーブル
 struct _cnt_dev_tbl {
 	struct timespec exec_tim;	// 実行時刻
+	time_t enable_tim;			// リセット後の取り込み開始時刻
 	int	rd;						// 読み込みポインタ
 	int	wr;						// 書き込みポインタ
 	int	n;						// 受信数
 #define	CNT_DEV_SZ	800
 	char buf[CNT_DEV_SZ];		// 2秒分のデータバッファ
 	time_t	tm[CNT_DEV_SZ];		// 取込み時刻
-} static cnt_dev_tbl={{0,0}, 0, 0, 0};
+} static cnt_dev_tbl={{0,0}, 0, 0, 0, 0};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -542,7 +543,7 @@ static void count_dev_rcv(void)
 		pthread_mutex_unlock(&shm->mutex);
 //printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 		// データが有効なら取り込む(データが有効になるのは10msecごと)
-		if (data[0]&0x02) {
+		if (tim_now.tv_sec>=cnt_dev_tbl.enable_tim && data[0]&0x02) {
 //printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X %d\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f, ((data[1]&0x3f)<<12)+((data[2]&0x3f)<<6)+(data[3]&0x3f));
@@ -623,8 +624,8 @@ static void count_dev_reset(void)
 	cnt_dev_tbl.wr = 0;
 	cnt_dev_tbl.n  = 0;
 	clock_gettime(CLOCK_MONOTONIC_RAW, &cnt_dev_tbl.exec_tim);
-	cnt_dev_tbl.exec_tim.tv_sec += 1;
-	cnt_dev_tbl.exec_tim.tv_nsec = 0;
+	cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
+	cnt_dev_tbl.enable_tim=cnt_dev_tbl.exec_tim.tv_sec+1;
 }
 
 // フォトンカウント取り込みバッファ取り込み数
@@ -698,13 +699,13 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	unsigned long dat_bk1=0L, dat_bk2=0L;
 	double e1=0.0, e2=0.0;
 	int ret=-1;
-	int i, k;
+	int i, j, k;
 	FILE *fp;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
 //printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
 	if (fp) {
-		for (i=0; i<(cnt_tbl.n-3); ) {
+		for (i=0, j=1; i<(cnt_tbl.n-3); j++) {
 			unsigned long total=0L;
 			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
 			time_t tm=cnt_tbl.tm[i];
@@ -759,8 +760,7 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "1,%10ld,%d\r\n", (m>0)?(total/m):0L, m);
-//				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
+				fprintf(fp, "%4d,%10ld,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m);
 			}
 		}
 		fclose(fp);
