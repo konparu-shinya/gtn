@@ -32,7 +32,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff
 
   def initialize
     @spi = WiringPiSpi.new
@@ -46,6 +46,8 @@ class Window
     win.set_default_size(100,200)
     win.signal_connect(:destroy){exit_seq}
 
+    lblAna   = Gtk::Label.new("号機");
+    @entAna  = Gtk::Entry.new
     lbtn     = Gtk::Button.new.add(Gtk::Arrow.new(Gtk::Arrow::LEFT, Gtk::SHADOW_NONE))
     rbtn     = Gtk::Button.new.add(Gtk::Arrow.new(Gtk::Arrow::RIGHT, Gtk::SHADOW_NONE))
     lblLED   = Gtk::Label.new("LED電流値");
@@ -134,6 +136,10 @@ class Window
             @entCntTime.set_text("#{ary[1]}") if ary[1]
           when 'pump'
             @entPumpCfg.set_text("#{ary[1]}") if ary[1]
+          when 'pump'
+            @entPumpCfg.set_text("#{ary[1]}") if ary[1]
+          when 'ana_no'
+            @entAna.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
@@ -146,7 +152,8 @@ class Window
     @spi.gate_time(@entGT.text.to_i)
     # pump on/off
     value = @entPumpCfg.text.to_i
-    @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+   #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+    @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
@@ -212,50 +219,53 @@ class Window
     @entPumpCfg.signal_connect('changed') do 
       # pump on/off
       value = @entPumpCfg.text.to_i
-      @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+     #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+      @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
     end
 
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
-    tbl.attach_defaults(lblLED,     0, 2, 0, 1)
-    tbl.attach_defaults(@entLED,    2, 5, 0, 1)
-    tbl.attach_defaults(@lblLVal,   6, 7, 0, 1)
-    tbl.attach_defaults(@lblLA,     7, 8, 0, 1)
-    tbl.attach_defaults(lbtn,       0, 1, 1, 2)
-    tbl.attach_defaults(@scrl,      1, 7, 1, 2)
-    tbl.attach_defaults(rbtn,       7, 8, 1, 2)
-    tbl.attach_defaults(@cbOnOff,   2, 4, 2, 3)
-    tbl.attach_defaults(@lblCount,  4, 6, 2, 3)
-    tbl.attach_defaults(@lblTime,   6, 8, 2, 3)
-    tbl.attach_defaults(btnSt,      4, 6, 3, 4)
-    tbl.attach_defaults(btnStp,     4, 6, 4, 5)
-    tbl.attach_defaults(@lblTm2,    6, 8, 3, 4)
-    tbl.attach_defaults(@lblErr,    6, 8, 4, 5)
+    tbl.attach_defaults(@entAna,    0, 5, 0, 1)
+    tbl.attach_defaults(lblAna,     5, 7, 0, 1)
+    tbl.attach_defaults(lblLED,     0, 2, 1, 2)
+    tbl.attach_defaults(@entLED,    2, 5, 1, 2)
+    tbl.attach_defaults(@lblLVal,   6, 7, 1, 2)
+    tbl.attach_defaults(@lblLA,     7, 8, 1, 2)
+    tbl.attach_defaults(lbtn,       0, 1, 2, 3)
+    tbl.attach_defaults(@scrl,      1, 7, 2, 3)
+    tbl.attach_defaults(rbtn,       7, 8, 2, 3)
+    tbl.attach_defaults(@cbOnOff,   2, 4, 3, 4)
+    tbl.attach_defaults(@lblCount,  4, 6, 3, 4)
+    tbl.attach_defaults(@lblTime,   6, 8, 3, 4)
+    tbl.attach_defaults(btnSt,      4, 6, 4, 5)
+    tbl.attach_defaults(btnStp,     4, 6, 5, 6)
+    tbl.attach_defaults(@lblTm2,    6, 8, 4, 5)
+    tbl.attach_defaults(@lblErr,    6, 8, 5, 6)
 
-    tbl.attach_defaults(lblGT,      0, 2, 6, 7)
-    tbl.attach_defaults(@entGT,     2, 5, 6, 7)
-    tbl.attach_defaults(lblGTUnit,  5, 6, 6, 7)
-    tbl.attach_defaults(lblLED_ON,  0, 2, 7, 8)
-    tbl.attach_defaults(@entLED_ON, 2, 5, 7, 8)
-    tbl.attach_defaults(lblUnit1,   5, 7, 7, 8)
-    tbl.attach_defaults(lblDelay,   0, 2, 8, 9)
-    tbl.attach_defaults(@entDelay,  2, 5, 8, 9)
-    tbl.attach_defaults(lblUnit2,   5, 7, 8, 9)
-    tbl.attach_defaults(lblCntTime, 0, 2, 9,10)
-    tbl.attach_defaults(@entCntTime,2, 5, 9,10)
-    tbl.attach_defaults(lblUnit3,   5, 7, 9,10)
+    tbl.attach_defaults(lblGT,      0, 2, 7, 8)
+    tbl.attach_defaults(@entGT,     2, 5, 7, 8)
+    tbl.attach_defaults(lblGTUnit,  5, 6, 7, 8)
+    tbl.attach_defaults(lblLED_ON,  0, 2, 8, 9)
+    tbl.attach_defaults(@entLED_ON, 2, 5, 8, 9)
+    tbl.attach_defaults(lblUnit1,   5, 7, 8, 9)
+    tbl.attach_defaults(lblDelay,   0, 2, 9,10)
+    tbl.attach_defaults(@entDelay,  2, 5, 9,10)
+    tbl.attach_defaults(lblUnit2,   5, 7, 9,10)
+    tbl.attach_defaults(lblCntTime, 0, 2,10,11)
+    tbl.attach_defaults(@entCntTime,2, 5,10,11)
+    tbl.attach_defaults(lblUnit3,   5, 7,10,11)
 
-    tbl.attach_defaults(lblTMP,     0, 2,11,12)
-    tbl.attach_defaults(@entTMP,    2, 5,11,12)
-    tbl.attach_defaults(lblDo,      5, 6,11,12)
-    tbl.attach_defaults(@lblTVal,   6, 7,11,12)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,12,13)
-    tbl.attach_defaults(@entTMPCfga,2, 5,12,13)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,13,14)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,13,14)
+    tbl.attach_defaults(lblTMP,     0, 2,12,13)
+    tbl.attach_defaults(@entTMP,    2, 5,12,13)
+    tbl.attach_defaults(lblDo,      5, 6,12,13)
+    tbl.attach_defaults(@lblTVal,   6, 7,12,13)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,13,14)
+    tbl.attach_defaults(@entTMPCfga,2, 5,13,14)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,14,15)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,14,15)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,15,16)
-    tbl.attach_defaults(@entPumpCfg,2, 5,15,16)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,16,17)
+    tbl.attach_defaults(@entPumpCfg,2, 5,16,17)
 
     win.add(tbl)
     win.show_all()
@@ -310,7 +320,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -345,6 +355,9 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'pump'
         fw << "pump=#{@entPumpCfg.text.to_i}\n"
         set_flag[8] = true
+      when 'ana_no'
+        fw << "ana_no=#{@entAna.text}\n"
+        set_flag[9] = true
       else
         fw << line
       end
@@ -359,6 +372,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "led_delay=#{@entDelay.text.to_i}\n" if set_flag[6] == nil
     fw << "count_tm=#{@entCntTime.text.to_i}\n" if set_flag[7] == nil
     fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
+    fw << "ana_no=#{@entAna.text}\n" if set_flag[9] == nil
     fw.close
 
     Gtk.main_quit()
