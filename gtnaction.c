@@ -116,33 +116,33 @@ struct _seq_tbl {
 
 // フォトンカウント管理テーブル
 struct _cnt_tbl {
-	int	busy;					// 1:カウント取込み中
-	int mode;					// 0:10ms生データ出力 1:1secごとのファイル出力 2:10msecフィルタデータ出力
-	int n;						// 取り込んだデータ数
-	int	sec;					// カウント取り込み秒数表示
-	int	times;					// カウント取り込み秒数
-	int owner;					// 指示コンソールNo.
-	int min;					// カウントMin値
-	int max;					// カウントMax値
-	time_t t;					// カウント取込み開始
-	struct timespec tim_start;	// カウント取込み開始
-//	struct timespec tim_trig;	// カウント取込みトリガ
-	char str_start[32];			// カウント取込み開始時刻文字列
+	int	busy;							// 1:カウント取込み中
+	int mode;							// 0:10ms生データ出力 1:1secごとのファイル出力 2:10msecフィルタデータ出力
+	int n;								// 取り込んだデータ数
+	int	sec;							// カウント取り込み秒数表示
+	int	times;							// カウント取り込み秒数
+	int owner;							// 指示コンソールNo.
+	int min;							// カウントMin値
+	int max;							// カウントMax値
+	time_t t;							// カウント取込み開始
+	struct timespec tim_start;			// カウント取込み開始
+//	struct timespec tim_trig;			// カウント取込みトリガ
+	char str_start[32];					// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
-	char buf[2000*CNT_SZ];		// 2000秒のデータバッファ
-	time_t	tm[2000*CNT_SZ];	// 取込み時刻
+	char buf[2000*CNT_SZ];				// 2000秒のデータバッファ
+	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
 } static cnt_tbl={0, 0, 0};
 
 // フォトンカウント取り込みバッファテーブル
 struct _cnt_dev_tbl {
-	struct timespec exec_tim;	// 実行時刻
-	time_t enable_tim;			// リセット後の取り込み開始時刻
-	int	rd;						// 読み込みポインタ
-	int	wr;						// 書き込みポインタ
-	int	n;						// 受信数
+	struct timespec exec_tim;			// 実行時刻
+	time_t enable_tim;					// リセット後の取り込み開始時刻
+	int	rd;								// 読み込みポインタ
+	int	wr;								// 書き込みポインタ
+	int	n;								// 受信数
 #define	CNT_DEV_SZ	800
-	char buf[CNT_DEV_SZ];		// 2秒分のデータバッファ
-	time_t	tm[CNT_DEV_SZ];		// 取込み時刻
+	char buf[CNT_DEV_SZ];				// 2秒分のデータバッファ
+	struct timespec	tm[CNT_DEV_SZ];		// 取込み時刻
 } static cnt_dev_tbl={{0,0}, 0, 0, 0, 0};
 
 // 動作シーケンス格納テーブル
@@ -509,8 +509,16 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// 現在時刻取得
+static struct timespec tim_get_now(void)
+{
+	struct timespec tim_now;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+	return tim_now;
+}
+
 // tmにaddを加算する
-struct timespec tim_add(struct timespec tm, long addmsec)
+static struct timespec tim_add(struct timespec tm, long addmsec)
 {
 	tm.tv_nsec += ((addmsec%1000)*1000000);
 	if (tm.tv_nsec>=1000000000) {
@@ -526,24 +534,24 @@ struct timespec tim_add(struct timespec tm, long addmsec)
 static int tim_diff(struct timespec t1, struct timespec t2, long msec)
 {
 	struct timespec tm = tim_add(t2, msec);
-	return (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec)?1:0;
+	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
 }
 
-// フォトンカウント取り込み 5msec周期に取り込む
+// フォトンカウント取り込み 40msec周期に取り込む
 static void count_dev_rcv(void)
 {
-	struct timespec tim_now;
+	struct timespec tim_now=tim_get_now();
 	int over_led=0;
 	// 10msec毎にフォトンカウント取り込み
-	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
 	if (tim_diff(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data[4]={0x14,0x40,0x80,0xc0};
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 		pthread_mutex_unlock(&shm->mutex);
 //printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
-		// データが有効なら取り込む(データが有効になるのは10msecごと)
+		// データが有効なら取り込む(データが有効になるのは40msecごと)
 		if (tim_now.tv_sec>=cnt_dev_tbl.enable_tim && data[0]&0x02) {
+//		if (data[0]&0x02) {
 //printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
 //printf("%s %d %8d %10d %6d %02X %02X %02X %02X %d\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f, ((data[1]&0x3f)<<12)+((data[2]&0x3f)<<6)+(data[3]&0x3f));
@@ -586,10 +594,10 @@ static void count_dev_rcv(void)
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+2]=data[2];
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+3]=data[3];
 
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+0]=tim_now.tv_sec;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+1]=tim_now.tv_sec;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+2]=tim_now.tv_sec;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+3]=tim_now.tv_sec;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+0]=tim_now;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+1]=tim_now;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+2]=tim_now;
+				cnt_dev_tbl.tm[cnt_dev_tbl.wr+3]=tim_now;
 
 				cnt_dev_tbl.wr = (cnt_dev_tbl.wr+4)%CNT_DEV_SZ;
 
@@ -623,8 +631,7 @@ static void count_dev_reset(void)
 	cnt_dev_tbl.rd = 0;
 	cnt_dev_tbl.wr = 0;
 	cnt_dev_tbl.n  = 0;
-	clock_gettime(CLOCK_MONOTONIC_RAW, &cnt_dev_tbl.exec_tim);
-	cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
+	cnt_dev_tbl.exec_tim=tim_add(tim_get_now(), 10);
 	cnt_dev_tbl.enable_tim=cnt_dev_tbl.exec_tim.tv_sec+1;
 }
 
@@ -635,12 +642,14 @@ static int count_dev_n(void)
 }
 
 // フォトンカウント取り込みバッファ読み出し
-static int count_dev_read(char *ptr, time_t *tm, int len)
+static int count_dev_read(char *ptr, struct timespec *tm, int len)
 {
 	int n=0;
 	while (len>0 && cnt_dev_tbl.n>0) {
 		*ptr++ = cnt_dev_tbl.buf[cnt_dev_tbl.rd];
-		*tm++ = cnt_dev_tbl.tm[cnt_dev_tbl.rd];
+		if (tm!=NULL) {
+			*tm++ = cnt_dev_tbl.tm[cnt_dev_tbl.rd];
+		}
 //printf("%s %d %4d %02X %d\n", __FILE__, __LINE__, len, cnt_dev_tbl.buf[cnt_dev_tbl.rd]&0x3f, cnt_dev_tbl.rd);
 		cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
 		cnt_dev_tbl.n--;
@@ -708,10 +717,10 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 		for (i=0, j=1; i<(cnt_tbl.n-3); j++) {
 			unsigned long total=0L;
 			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
-			time_t tm=cnt_tbl.tm[i];
+			struct timespec tm=cnt_tbl.tm[i];
 			int m=0;
 //printf("%s %d %4d\n", __FILE__, __LINE__, i);
-			while (i<(cnt_tbl.n-3) && tm==cnt_tbl.tm[i]) {
+			while (i<(cnt_tbl.n-3) && tm.tv_sec==cnt_tbl.tm[i].tv_sec) {
 				if ((cnt_tbl.buf[i+0]&cnt_head[7])==cnt_head[l+0] &&
 					(cnt_tbl.buf[i+1]&cnt_head[7])==cnt_head[l+1] &&
 					(cnt_tbl.buf[i+2]&cnt_head[7])==cnt_head[l+2] &&
@@ -721,6 +730,10 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 					for (k=0; k<3; k++) {
 						dat += (cnt_tbl.buf[i+k+1]&0x3f) << (6*(3-1-k));
 					}
+			// debug出力
+//				{
+//					fprintf(fp, "0,%4d,%10ld,%d,%d\r\n", i+1, dat, cnt_tbl.tm[i].tv_sec, cnt_tbl.tm[i].tv_nsec);
+//				}
 					// 10ms生データ出力
 					if (cnt_tbl.mode==0) {
 						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
@@ -760,7 +773,8 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%4d,%10ld,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m);
+//				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, tm.tv_sec);
+				fprintf(fp, "%4d,%10ld,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, tm.tv_sec);
 			}
 		}
 		fclose(fp);
@@ -930,13 +944,12 @@ static int sequence(int sock, int no)
 	case 0x51:		// 指定時間まち(×10msec)
 		if (pseq->busy==0) {
 			pseq->busy=1;
-			clock_gettime(CLOCK_MONOTONIC, &pseq->wai_start);
+			pseq->wai_start=tim_get_now();
 		}
 		else{
 			time_t msec;
 			long sec;
-			struct timespec tim_end;
-			clock_gettime(CLOCK_MONOTONIC, &tim_end);
+			struct timespec tim_end=tim_get_now();
 			if((tim_end.tv_nsec - pseq->wai_start.tv_nsec) < 0){
 				tim_end.tv_nsec += 1000000000;
 				tim_end.tv_sec  -= 1;
@@ -1061,7 +1074,7 @@ static int sequence(int sock, int no)
 			count_dev_reset();
 
 			cnt_tbl.t = t;
-			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
+			cnt_tbl.tim_start=tim_get_now();
 //			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_start, 1000);
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
@@ -1175,7 +1188,7 @@ static int sequence(int sock, int no)
 	if (cnt_tbl.busy==1) {
 		time_t nsec;
 		long sec;
-		struct timespec tim_now;
+		struct timespec tim_now=tim_get_now();
 		int n=count_dev_n();
 		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
 			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], n);
@@ -1183,7 +1196,6 @@ static int sequence(int sock, int no)
 		}
 
 		// 経過時間を得る
-		clock_gettime(CLOCK_MONOTONIC, &tim_now);
 		if((tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec) < 0){
 			tim_now.tv_nsec += 1000000000;
 			tim_now.tv_sec  -= 1;
@@ -1219,8 +1231,7 @@ static int sequence(int sock, int no)
 		/* 経過時間を表示する */
 		time_t msec;
 		long sec;
-		struct timespec tim_end;
-		clock_gettime(CLOCK_MONOTONIC, &tim_end);
+		struct timespec tim_end=tim_get_now();
 		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
 			tim_end.tv_nsec += 1000000000;
 			tim_end.tv_sec  -= 1;
@@ -1356,7 +1367,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			pseq->run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
 			pseq->run          = 1;
 			message(sock, no, 1, 1, "RUN");
-			clock_gettime(CLOCK_MONOTONIC, &tim_start);
+			tim_start=tim_get_now();
 
 			/* Step実行の場合は前回のレジスタ値に戻す */
 			if (pseq->ret_line) {
@@ -1433,12 +1444,11 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 static int execute(int sock)
 {
 	char buf[512], str[32];
-	time_t tm[CNT_SZ];
 	int i, n, len=1;
 	struct timespec tim_last, tim_last2, tim_now;
 
 	count_dev_reset();
-	clock_gettime(CLOCK_MONOTONIC, &tim_last);
+	tim_last=tim_get_now();
 	tim_last2=tim_last;
 
 	while (len!=0) {
@@ -1474,7 +1484,7 @@ static int execute(int sock)
 		}
 
 		// 温度を取り込んで表示
-		clock_gettime(CLOCK_MONOTONIC, &tim_now);
+		tim_now=tim_get_now();
 		if (tim_last.tv_sec<tim_now.tv_sec) {
         static int flag=0, led_conf=0;
 			pthread_mutex_lock(&shm->mutex);
@@ -1504,7 +1514,7 @@ static int execute(int sock)
 				// カウント取り込みが非動作であればここでデータを取り込む
 				if (cnt_tbl.busy==0) {
 					int n=count_dev_n();
-					count_dev_read(buf, tm, n);
+					count_dev_read(buf, NULL, n);
 					shm->count=get_1st_data(buf, n);
 				}
 
