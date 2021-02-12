@@ -126,7 +126,6 @@ struct _cnt_tbl {
 	int max;							// カウントMax値
 	time_t t;							// カウント取込み開始
 	struct timespec tim_start;			// カウント取込み開始
-//	struct timespec tim_trig;			// カウント取込みトリガ
 	char str_start[32];					// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
 	char buf[2000*CNT_SZ];				// 2000秒のデータバッファ
@@ -531,10 +530,26 @@ static struct timespec tim_add(struct timespec tm, long addmsec)
 
 // 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
 // 戻値 1:TimeUP
-static int tim_diff(struct timespec t1, struct timespec t2, long msec)
+static int tim_timeup(struct timespec t1, struct timespec t2, long msec)
 {
 	struct timespec tm = tim_add(t2, msec);
 	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻
+static struct timespec tim_diff(struct timespec t1, struct timespec t2)
+{
+	struct timespec ret={0,0};
+	if (tim_timeup(t1, t2, 0)==0) {
+		return ret;
+	}
+	if (t1.tv_sec>0 && t1.tv_nsec<t2.tv_nsec) {
+		t1.tv_nsec += 1000000000;
+		t1.tv_sec  -= 1;
+	}
+	ret.tv_sec = t1.tv_sec-t2.tv_sec;
+	ret.tv_nsec = t1.tv_nsec-t2.tv_nsec;
+	return ret;
 }
 
 // フォトンカウント取り込み 40msec周期に取り込む
@@ -543,7 +558,7 @@ static void count_dev_rcv(void)
 	struct timespec tim_now=tim_get_now();
 	int over_led=0;
 	// 10msec毎にフォトンカウント取り込み
-	if (tim_diff(tim_now, cnt_dev_tbl.exec_tim, 0)) {
+	if (tim_timeup(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data[4]={0x14,0x40,0x80,0xc0};
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
@@ -614,8 +629,10 @@ static void count_dev_rcv(void)
 }
 
 // フォトンカウント取り込みバッファテーブルのクリア
-static void count_dev_reset(void)
+// 戻値:取込み開始時刻
+static struct timespec count_dev_reset(void)
 {
+	struct timespec ret;
 	// オーバーフローエラーが解消されるまで取り込む
 	int i;
 	pthread_mutex_lock(&shm->mutex);
@@ -633,6 +650,10 @@ static void count_dev_reset(void)
 	cnt_dev_tbl.n  = 0;
 	cnt_dev_tbl.exec_tim=tim_add(tim_get_now(), 10);
 	cnt_dev_tbl.enable_tim=cnt_dev_tbl.exec_tim.tv_sec+1;
+
+	ret.tv_sec=cnt_dev_tbl.enable_tim;
+	ret.tv_nsec=0;
+	return ret;
 }
 
 // フォトンカウント取り込みバッファ取り込み数
@@ -947,18 +968,10 @@ static int sequence(int sock, int no)
 			pseq->wai_start=tim_get_now();
 		}
 		else{
-			time_t msec;
-			long sec;
-			struct timespec tim_end=tim_get_now();
-			if((tim_end.tv_nsec - pseq->wai_start.tv_nsec) < 0){
-				tim_end.tv_nsec += 1000000000;
-				tim_end.tv_sec  -= 1;
-			}
-			msec = (tim_end.tv_nsec - pseq->wai_start.tv_nsec)/1000000;
-			sec  = tim_end.tv_sec - pseq->wai_start.tv_sec;
-
-			if (((sec*1000)+msec) >= pact->move_pulse) {
-				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, sec, msec/100);
+			struct timespec tim_now=tim_get_now();
+			if (tim_timeup(tim_now, pseq->wai_start, pact->move_pulse)) {
+				struct timespec tim=tim_diff(tim_now, pseq->wai_start);
+				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
 				pseq->busy=0;
 				pseq->current++;
 			}
@@ -1071,11 +1084,8 @@ static int sequence(int sock, int no)
 			cnt_tbl.min      =pact->start_pulse + (pact->max_pulse<<16);
 			cnt_tbl.max      =pact->st_slope + (pact->ed_slope<<16);
 
-			count_dev_reset();
-
 			cnt_tbl.t = t;
-			cnt_tbl.tim_start=tim_get_now();
-//			cnt_tbl.tim_trig=tim_add(cnt_tbl.tim_start, 1000);
+			cnt_tbl.tim_start=count_dev_reset();	// リセット&取込み開始時刻の取得
 			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
 		}
 		pseq->current++;
@@ -1186,35 +1196,25 @@ static int sequence(int sock, int no)
 
 	// カウント取込み処理
 	if (cnt_tbl.busy==1) {
-		time_t nsec;
-		long sec;
-		struct timespec tim_now=tim_get_now();
+		// カウント取込み
 		int n=count_dev_n();
 		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
 			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], n);
 			cnt_tbl.n+=n;
 		}
 
-		// 経過時間を得る
-		if((tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec) < 0){
-			tim_now.tv_nsec += 1000000000;
-			tim_now.tv_sec  -= 1;
-		}
-		nsec = tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec;
-		sec  = tim_now.tv_sec - cnt_tbl.tim_start.tv_sec;
-
-		// 取り込み終了判定(取り込み開始ディレイがあるので+1まで取り込む)
-		if ((cnt_tbl.times+1) <= sec) {
+		// 取り込み終了判定
+		if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.times+1)*1000)) {
 			cnt_tbl.busy=0;
 		}
 		// 1秒ごとの表示
-		else if (cnt_tbl.sec < sec) {
+		else if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.sec+1)*1000)) {
 			shm->count=(cnt_tbl.n>25)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-25], 25):0L;
-			cnt_tbl.sec = sec;
-			sprintf(str, "取込:%lu秒 :%ld", sec, shm->count);
+			cnt_tbl.sec += 1;
+			sprintf(str, "取込:%lu秒 :%ld", cnt_tbl.sec, shm->count);
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, sec, shm->count);
+			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, cnt_tbl.sec, shm->count);
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -1229,19 +1229,9 @@ static int sequence(int sock, int no)
 	// 終了判定
 	if (pseq->current >= pseq->max_line || error) {
 		/* 経過時間を表示する */
-		time_t msec;
-		long sec;
-		struct timespec tim_end=tim_get_now();
-		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
-			tim_end.tv_nsec += 1000000000;
-			tim_end.tv_sec  -= 1;
-		}
-		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
-		sec  = tim_end.tv_sec - tim_start.tv_sec;
-
-		sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, sec, msec/100);
+		struct timespec tim=tim_diff(tim_get_now(), tim_start);
+		sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
 		message(sock, no, 1, 2, str);
-
 
 		pseq->count++;
 		// 終了
@@ -1443,13 +1433,11 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 // コンソールとのソケット送受信
 static int execute(int sock)
 {
-	char buf[512], str[32];
+	char buf[1024], str[32];
 	int i, n, len=1;
-	struct timespec tim_last, tim_last2, tim_now;
+	struct timespec tim_last=tim_get_now();
 
 	count_dev_reset();
-	tim_last=tim_get_now();
-	tim_last2=tim_last;
 
 	while (len!=0) {
 
@@ -1484,8 +1472,7 @@ static int execute(int sock)
 		}
 
 		// 温度を取り込んで表示
-		tim_now=tim_get_now();
-		if (tim_last.tv_sec<tim_now.tv_sec) {
+		if (tim_timeup(tim_get_now(), tim_last, 1000)) {
         static int flag=0, led_conf=0;
 			pthread_mutex_lock(&shm->mutex);
             flag^=1;
@@ -1509,21 +1496,18 @@ static int execute(int sock)
             }
 			pthread_mutex_unlock(&shm->mutex);
 
-			// 1秒ごとに表示
-			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
-				// カウント取り込みが非動作であればここでデータを取り込む
-				if (cnt_tbl.busy==0) {
-					int n=count_dev_n();
-					count_dev_read(buf, NULL, n);
-					shm->count=get_1st_data(buf, n);
-				}
-
-		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%d℃   %ld", temp, shm->count);
-				message(sock, 0, 1, 1, str);
-				tim_last2=tim_now;
+			// カウント取り込みが非動作であればここでデータを取り込む
+			if (cnt_tbl.busy==0) {
+				int n=count_dev_n();
+				count_dev_read(buf, NULL, n);
+				shm->count=get_1st_data(buf, n);
 			}
-			tim_last=tim_now;
+
+		//	sprintf(str, "%03X %.2f℃", led_conf, temp);
+			sprintf(str, "%d℃   %ld", temp, shm->count);
+			message(sock, 0, 1, 1, str);
+
+			tim_last=tim_get_now();
 		}
 	}
 	return 0;
