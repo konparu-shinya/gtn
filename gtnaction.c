@@ -83,7 +83,7 @@ const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 #define ETX		0x03
 #define ENQ		0x05
 #define EOT		0x04
-#define TIMEOUT	30000
+#define TIMEOUT	3000
 
 static const int rts=TIOCM_RTS;
 // for RS232C
@@ -199,6 +199,50 @@ static struct timespec tim_start;
 static void count_dev_rcv(void);
 
 
+// 現在時刻取得
+static struct timespec tim_get_now(void)
+{
+	struct timespec tim_now;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+	return tim_now;
+}
+
+// tmにaddを加算する
+static struct timespec tim_add(struct timespec tm, long addmsec)
+{
+	tm.tv_nsec += ((addmsec%1000)*1000000);
+	if (tm.tv_nsec>=1000000000) {
+		tm.tv_sec += 1;
+		tm.tv_nsec -= 1000000000;
+	}
+	tm.tv_sec += (addmsec/1000);
+	return tm;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
+// 戻値 1:TimeUP
+static int tim_timeup(struct timespec t1, struct timespec t2, long msec)
+{
+	struct timespec tm = tim_add(t2, msec);
+	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻
+static struct timespec tim_diff(struct timespec t1, struct timespec t2)
+{
+	struct timespec ret={0,0};
+	if (tim_timeup(t1, t2, 0)==0) {
+		return ret;
+	}
+	if (t1.tv_sec>0 && t1.tv_nsec<t2.tv_nsec) {
+		t1.tv_nsec += 1000000000;
+		t1.tv_sec  -= 1;
+	}
+	ret.tv_sec = t1.tv_sec-t2.tv_sec;
+	ret.tv_nsec = t1.tv_nsec-t2.tv_nsec;
+	return ret;
+}
+
 
 // CRC計算
 static unsigned char calc_crc(char *sbuf, int size)
@@ -223,41 +267,41 @@ static void nt_send(int sock, char *sbuf, int size)
 // 戻値:0:SockClose >0:STX,ETXを除いた受信長 <0:Error
 static int nt_recv(int sock, char c, char *p)
 {
-	int len, length, tm, i, count=0;
+	struct timespec tim_last=tim_get_now();
+	int len, length, i, count=0;
 	// STX
 	if (c!=STX) return -1;
 	p[count++] = c;
 
 	// length
-	for (tm=0; tm<TIMEOUT; tm++) {
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	length = (int)c;
 	p[count++] = c;
 
+	tim_last=tim_get_now();
 	for (i=1; i<length; i++) {
-		for (tm=0; tm<TIMEOUT; tm++) {
+		while (1) {
 			len = recv(sock, &c, 1, 0);
 			if (len==0) return 0;
 			if (len>0) break;
-			usleep(100);
+			if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 		}
-		if (tm>=TIMEOUT) return -1;
 		p[count++] = c;
 	}
 
 	// ETX
-	for (tm=0; tm<TIMEOUT; tm++) {
+	tim_last=tim_get_now();
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	if (c!=ETX) return -1;
 	p[count++] = c;
 
@@ -506,50 +550,6 @@ static int ppm_init(int ch)
 		break;
 	}
 	return (pctrl->driving==5) ? 0:1;
-}
-
-// 現在時刻取得
-static struct timespec tim_get_now(void)
-{
-	struct timespec tim_now;
-	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
-	return tim_now;
-}
-
-// tmにaddを加算する
-static struct timespec tim_add(struct timespec tm, long addmsec)
-{
-	tm.tv_nsec += ((addmsec%1000)*1000000);
-	if (tm.tv_nsec>=1000000000) {
-		tm.tv_sec += 1;
-		tm.tv_nsec -= 1000000000;
-	}
-	tm.tv_sec += (addmsec/1000);
-	return tm;
-}
-
-// 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
-// 戻値 1:TimeUP
-static int tim_timeup(struct timespec t1, struct timespec t2, long msec)
-{
-	struct timespec tm = tim_add(t2, msec);
-	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
-}
-
-// 引数 t1:経過時刻 t2:起点時刻
-static struct timespec tim_diff(struct timespec t1, struct timespec t2)
-{
-	struct timespec ret={0,0};
-	if (tim_timeup(t1, t2, 0)==0) {
-		return ret;
-	}
-	if (t1.tv_sec>0 && t1.tv_nsec<t2.tv_nsec) {
-		t1.tv_nsec += 1000000000;
-		t1.tv_sec  -= 1;
-	}
-	ret.tv_sec = t1.tv_sec-t2.tv_sec;
-	ret.tv_nsec = t1.tv_nsec-t2.tv_nsec;
-	return ret;
 }
 
 // フォトンカウント取り込み 40msec周期に取り込む
@@ -1458,8 +1458,6 @@ static int execute(int sock)
 			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
 			// コマンド割り振り
 			dispatch(sock, buf);
-			// コマンド受け取るごとにリセット
-			count_dev_reset();
 		}
 
 		// シーケンス
