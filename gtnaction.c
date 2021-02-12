@@ -203,7 +203,8 @@ static void count_dev_rcv(void);
 static struct timespec tim_get_now(void)
 {
 	struct timespec tim_now;
-	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+//	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+	clock_gettime(CLOCK_MONOTONIC, &tim_now);
 	return tim_now;
 }
 
@@ -1499,11 +1500,11 @@ static int execute(int sock)
 				int n=count_dev_n();
 				count_dev_read(buf, NULL, n);
 				shm->count=get_1st_data(buf, n);
-			}
 
-		//	sprintf(str, "%03X %.2f℃", led_conf, temp);
-			sprintf(str, "%d℃   %ld", temp, shm->count);
-			message(sock, 0, 1, 1, str);
+			//	sprintf(str, "%03X %.2f℃", led_conf, temp);
+				sprintf(str, "%d℃   %ld", temp, shm->count);
+				message(sock, 0, 1, 1, str);
+			}
 
 			tim_last=tim_get_now();
 		}
