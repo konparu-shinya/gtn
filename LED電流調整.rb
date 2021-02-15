@@ -38,7 +38,7 @@ class Window
     @spi = WiringPiSpi.new
     @spi.setup_mode(1000000, 3)
 
-    @time_st  = Time.now
+    @time_st  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @time_st2 = nil
 
     win = Gtk::Window.new()
@@ -202,7 +202,7 @@ class Window
 
     btnSt.signal_connect('clicked') do 
       $led_conf = File.exist?(Led_conf) ? IO.readlines(Led_conf) : []
-      @time_st2 = Time.now
+      @time_st2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
     btnStp.signal_connect('clicked') do 
@@ -281,7 +281,7 @@ class Window
 
   # LED ON/OFF
   def set_led_on_off(active)
-    @time_st = Time.now
+    @time_st = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     # チェックボックスが外されたらレジスタ2をOFFにする
     rd = @spi.dataRW([0x2,0x40,0x80,0xc0])
@@ -423,10 +423,12 @@ Gtk.timeout_add( 1000 ) do
   # gtnactionからフォトンカウント値を取得
   w.lblCount.set_text("#{w.spi.foton_count}")
   # 経過時刻表示
-  tim = Time.at(Time.at(Time.now - w.time_st).getutc)
+# tim = Time.at(Time.at(Time.now - w.time_st).getutc)
+  tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st).getutc)
   w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")
   if w.time_st2
-    tim = Time.at(Time.at(Time.now - w.time_st2).getutc)
+#   tim = Time.at(Time.at(Time.now - w.time_st2).getutc)
+    tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st2).getutc)
     w.lblTm2.set_text("#{tim.strftime('%H:%M:%S')}")
   end
 
