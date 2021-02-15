@@ -597,9 +597,9 @@ static void count_dev_rcv(void)
 			// オーバーフロー
 			else if (data[0]&0x04) {
 //printf("%s %d %8d %8d %10d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_bk.tv_sec, tim_now.tv_sec, tim_bk.tv_nsec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
-				data[1] = 0x7f;
-				data[2] = 0xbf;
-				data[3] = 0xfd;
+//				data[1] = 0x7f;
+//				data[2] = 0xbf;
+//				data[3] = 0xfd;
 			}
 
 			// エラーがない場合に取り込む
@@ -699,6 +699,10 @@ static long get_1st_data(char buf[], int n)
 //				dat += (buf[j+k+1]&0x3f) << (6*k);
 				dat += (buf[j+k+1]&0x3f) << (6*(3-1-k));
 			}
+			//過大光確認
+			if (dat==0x3ffff) {
+				return 0x3ffff;
+			}
 //printf("%s %d %4d %4d %8d %08X %02X %02X %02X\n", __FILE__, __LINE__, m, j, dat, dat, (buf[j+1]&0x3f), (buf[j+2]&0x3f), (buf[j+3]&0x3f));
 			total += dat;
 			m++;
@@ -741,6 +745,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
 			struct timespec tm=cnt_tbl.tm[i];
 			int m=0;
+			int over_led=0;
 //printf("%s %d %4d\n", __FILE__, __LINE__, i);
 			while (i<(cnt_tbl.n-3) && tm.tv_sec==cnt_tbl.tm[i].tv_sec) {
 				if ((cnt_tbl.buf[i+0]&cnt_head[7])==cnt_head[l+0] &&
@@ -751,6 +756,10 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 					unsigned long dat=0L;
 					for (k=0; k<3; k++) {
 						dat += (cnt_tbl.buf[i+k+1]&0x3f) << (6*(3-1-k));
+					}
+					//過大光確認
+					if (dat==0x3ffff) {
+						over_led=1;
 					}
 			// debug出力
 //				{
@@ -795,8 +804,8 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-//				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, tm.tv_sec);
-				fprintf(fp, "%4d,%10ld,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, tm.tv_sec);
+//				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
+				fprintf(fp, "%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
 			}
 		}
 		fclose(fp);
