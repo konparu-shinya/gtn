@@ -584,9 +584,10 @@ static void count_dev_rcv(void)
 			}
 			// 過大光の場合
 			if (over_led) {
-				data[1] = 0x7f;
-				data[2] = 0xbf;
-				data[3] = 0xff;
+// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
+//				data[1] = 0x7f;
+//				data[2] = 0xbf;
+//				data[3] = 0xff;
 			}
 			// キャリー
 			else if (data[0]&0x08) {
@@ -759,15 +760,13 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 					}
 					//過大光確認
 					if (dat==0x3ffff) {
-						over_led=1;
+// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
+//						over_led=1;
 					}
-			// debug出力
-//				{
-//					fprintf(fp, "0,%4d,%10ld,%d,%d\r\n", i+1, dat, cnt_tbl.tm[i].tv_sec, cnt_tbl.tm[i].tv_nsec);
-//				}
 					// 10ms生データ出力
 					if (cnt_tbl.mode==0) {
-						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+//						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+						fprintf(fp, "0,%4d,%10ld,%d,%d\r\n", i+1, dat, cnt_tbl.tm[i].tv_sec, cnt_tbl.tm[i].tv_nsec);
 					}
 					// 10msecフィルタデータ出力
 					else if (cnt_tbl.mode==2) {
@@ -804,8 +803,11 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-//				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
 				fprintf(fp, "%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
+			}
+			// 10ms生データ出力
+			else if (cnt_tbl.mode==0) {
+				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
 			}
 		}
 		fclose(fp);
