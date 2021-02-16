@@ -582,6 +582,12 @@ static void count_dev_rcv(void)
 				// 過大光判定
 				over_led = (data2[3]&0x02)?1:0;
 			}
+			// 過大光の場合は最下位ビットを1にする
+			if (over_led) {
+				data[0] |= 0x01;
+			}else{
+				data[0] &= ~0x01;
+			}
 			// 過大光の場合
 			if (over_led) {
 // 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
@@ -603,8 +609,8 @@ static void count_dev_rcv(void)
 //				data[3] = 0xfd;
 			}
 
-			// エラーがない場合に取り込む
-			if ((data[0]&0x2C)==0) {
+			// エラーがない場合でも取り込む
+		//	if ((data[0]&0x2C)==0) {
 //printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+0]=data[0];
 				cnt_dev_tbl.buf[cnt_dev_tbl.wr+1]=data[1];
@@ -623,7 +629,7 @@ static void count_dev_rcv(void)
 					cnt_dev_tbl.rd = (cnt_dev_tbl.rd+4)%CNT_DEV_SZ;
 					cnt_dev_tbl.n  = CNT_DEV_SZ;
 				}
-			}
+		//	}
 		}
 		// 次回10msec後
 		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
@@ -758,11 +764,8 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 					for (k=0; k<3; k++) {
 						dat += (cnt_tbl.buf[i+k+1]&0x3f) << (6*(3-1-k));
 					}
-					//過大光確認
-					if (dat==0x3ffff) {
-// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
-//						over_led=1;
-					}
+					//過大光確認(count_dev_rcv関数でビット入れ替え操作)
+					over_led = (cnt_tbl.buf[i]&0x01)?1:0;
 					// 10ms生データ出力
 					if (cnt_tbl.mode==0) {
 //						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
@@ -803,11 +806,11 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
+				fprintf(fp, "%4d,%10ld,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, over_led, tm.tv_sec);
 			}
 			// 10ms生データ出力
 			else if (cnt_tbl.mode==0) {
-				fprintf(fp, "1,%4d,%10ld,%d,%d\r\n", j, (over_led==0)?((m>0)?GATE_COUNT(total/m):0L):0x3ffff, m, tm.tv_sec);
+				fprintf(fp, "1,%4d,%10ld,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, over_led, tm.tv_sec);
 			}
 		}
 		fclose(fp);
