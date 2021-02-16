@@ -126,10 +126,10 @@ struct _cnt_tbl {
 	int max;							// カウントMax値
 	time_t t;							// カウント取込み開始
 	struct timespec tim_start;			// カウント取込み開始
-	char str_start[32];					// カウント取込み開始時刻文字列
 #define	CNT_SZ	400
 	char buf[2000*CNT_SZ];				// 2000秒のデータバッファ
 	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
+	int	mkflag[2000];
 } static cnt_tbl={0, 0, 0};
 
 // フォトンカウント取り込みバッファテーブル
@@ -747,6 +747,10 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	fp=fopen(str, "w");
 //printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
 	if (fp) {
+		// header
+		if (cnt_tbl.mode==1) {
+			fprintf(fp, "no.,count,flag,n,light,time\r\n");
+		}
 		for (i=0, j=1; i<(cnt_tbl.n-3); j++) {
 			unsigned long total=0L;
 			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
@@ -806,11 +810,11 @@ printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%4d,%10ld,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, over_led, tm.tv_sec);
+				fprintf(fp, "%4d,%10ld,%d,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, tm.tv_sec);
 			}
 			// 10ms生データ出力
 			else if (cnt_tbl.mode==0) {
-				fprintf(fp, "1,%4d,%10ld,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, m, over_led, tm.tv_sec);
+				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, tm.tv_sec);
 			}
 		}
 		fclose(fp);
@@ -1101,7 +1105,7 @@ static int sequence(int sock, int no)
 
 			cnt_tbl.t = t;
 			cnt_tbl.tim_start=count_dev_reset();	// リセット&取込み開始時刻の取得
-			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
+			memset(cnt_tbl.mkflag, 0, sizeof(cnt_tbl.mkflag));
 		}
 		pseq->current++;
 		break;
@@ -1109,6 +1113,10 @@ static int sequence(int sock, int no)
 		if (cnt_tbl.busy==0) {
 			pseq->current++;
 		}
+		break;
+	case 0x75:		// マーキングフラグ
+		cnt_tbl.mkflag[cnt_tbl.sec]=pact->move_pulse;
+		pseq->current++;
 		break;
 	case 0x81:		// 音声1
 		if (fork()==0) {
