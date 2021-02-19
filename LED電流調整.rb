@@ -1,6 +1,7 @@
 #!/usr/bin/ruby
 
 require 'gtk2'
+require 'open3'
 require 'WiringPiSpi'
 
 Kakuchou_si   = '.pr6'
@@ -416,9 +417,6 @@ Gtk.timeout_add( 1000 ) do
   else
     $over = 0
   end
-  # errorの場合はリセットコマンドを発行する
-  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
-
   # 通信エラー
   if (ary[0]==0 && ary[1]==0 && ary[2]==0 && ary[3]==0)
     style = Gtk::Style.new
@@ -429,8 +427,17 @@ Gtk.timeout_add( 1000 ) do
     w.lblErr.set_text("");
   end
 
+  # gtn.rbプロセスがいなければSPIでフォトンカウントを取り込む
+  o, e, s = Open3.capture3("ps -ax")
+  unless /gtn.rb/ =~ o
+    ary = w.spi.dataRW([0x14,0x40,0x80,0xc0])
+    w.lblCount.set_text("#{((ary[1]&0x3f)<<12) + ((ary[2]&0x3f)<<6) + (ary[3]&0x3f)}")
+    # errorの場合はリセットコマンドを発行する
+    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if (ary[0]&0x20) == 0x20
   # gtnactionからフォトンカウント値を取得
-  w.lblCount.set_text("#{w.spi.foton_count}")
+  else
+    w.lblCount.set_text("#{w.spi.foton_count}")
+  end
   # 経過時刻表示
 # tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st).getutc)
