@@ -127,9 +127,10 @@ struct _cnt_tbl {
 	time_t t;							// カウント取込み開始
 	struct timespec tim_start;			// カウント取込み開始
 	long tim_start_fpga;				// FPGAのカウント取込み開始時刻
-	long buf[2000];						// 2000秒のデータバッファ
-	struct timespec tm[2000];			// 取込み時刻
-	long tm_fpga[2000];					// FPGAのカウント時刻
+#define	CNT_SZ	100
+	long buf[2000*CNT_SZ];				// 2000秒のデータバッファ
+	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
+	long tm_fpga[2000*CNT_SZ];			// FPGAのカウント時刻
 	int	mkflag[2000];
 } static cnt_tbl={0, 0, 0};
 
@@ -1161,7 +1162,7 @@ static int sequence(int sock, int no)
 	if (cnt_tbl.busy==1) {
 		// カウント取込み
 		int n=count_dev_n();
-		if ((cnt_tbl.n+n)<2000) {
+		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
 			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], &cnt_tbl.tm_fpga[cnt_tbl.n], n);
 			cnt_tbl.n+=n;
 		}
