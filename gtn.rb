@@ -1654,7 +1654,7 @@ class Input
 
     # Edit Wait new
     @edtWComment  = Gtk::Entry.new()
-    spnWTimes     = Gtk::Adjustment.new( 1, 1, 99999, 1, 2, 0 )
+    spnWTimes     = Gtk::Adjustment.new( 1, 1, 3600000, 1, 2, 0 )
     @spnBtnWTimes = Gtk::SpinButton.new( spnWTimes, 0, 0 )
     btnWWrite     = Gtk::Button.new( '書込み' )
 
