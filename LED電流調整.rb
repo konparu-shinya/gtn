@@ -1,6 +1,7 @@
 #!/usr/bin/ruby
 
 require 'gtk2'
+require 'open3'
 require 'WiringPiSpi'
 
 Kakuchou_si   = '.pr6'
@@ -32,7 +33,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed
 
   def initialize
     @spi = WiringPiSpi.new
@@ -61,6 +62,8 @@ class Window
     @entLED.set_xalign(1)
     @entLED.set_text("#{@scrl.value.floor}")
     @cbOnOff  = Gtk::CheckButton.new('LED ON')
+    @cbOverLed= Gtk::CheckButton.new('過大光でLED OFF')
+    @cbOverLed.active = true
     @lblCount = Gtk::Label.new("-");
     @lblTime  = Gtk::Label.new("-");
     btnSt     = Gtk::Button.new('START')
@@ -77,17 +80,17 @@ class Window
     @entLED_ON = Gtk::Entry.new
     @entLED_ON.set_text("30")
     @entLED_ON.set_xalign(1)
-    lblUnit1   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit1   = Gtk::Label.new("x0.1msec(0-99)");
     lblDelay   = Gtk::Label.new("ディレイ時間");
     @entDelay  = Gtk::Entry.new
     @entDelay.set_text("5")
     @entDelay.set_xalign(1)
-    lblUnit2   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit2   = Gtk::Label.new("x0.1msec(0-99)");
     lblCntTime = Gtk::Label.new("カウント時間");
     @entCntTime = Gtk::Entry.new
     @entCntTime.set_text("10")
     @entCntTime.set_xalign(1)
-    lblUnit3   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit3   = Gtk::Label.new("x0.1msec(0-99)");
 
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
@@ -140,6 +143,8 @@ class Window
             @entPumpCfg.set_text("#{ary[1]}") if ary[1]
           when 'ana_no'
             @entAna.set_text("#{ary[1]}") if ary[1]
+          when 'over_led'
+            @cbOverLed.active = ("#{ary[1]}"=="true")?true:false if ary[1]
           end
         end
       end
@@ -237,35 +242,36 @@ class Window
     tbl.attach_defaults(@cbOnOff,   2, 4, 3, 4)
     tbl.attach_defaults(@lblCount,  4, 6, 3, 4)
     tbl.attach_defaults(@lblTime,   6, 8, 3, 4)
-    tbl.attach_defaults(btnSt,      4, 6, 4, 5)
-    tbl.attach_defaults(btnStp,     4, 6, 5, 6)
-    tbl.attach_defaults(@lblTm2,    6, 8, 4, 5)
-    tbl.attach_defaults(@lblErr,    6, 8, 5, 6)
+    tbl.attach_defaults(@cbOverLed, 2, 8, 4, 5)
+    tbl.attach_defaults(btnSt,      4, 6, 5, 6)
+    tbl.attach_defaults(btnStp,     4, 6, 6, 7)
+    tbl.attach_defaults(@lblTm2,    6, 8, 5, 6)
+    tbl.attach_defaults(@lblErr,    6, 8, 6, 7)
 
-    tbl.attach_defaults(lblGT,      0, 2, 7, 8)
-    tbl.attach_defaults(@entGT,     2, 5, 7, 8)
-    tbl.attach_defaults(lblGTUnit,  5, 6, 7, 8)
-    tbl.attach_defaults(lblLED_ON,  0, 2, 8, 9)
-    tbl.attach_defaults(@entLED_ON, 2, 5, 8, 9)
-    tbl.attach_defaults(lblUnit1,   5, 7, 8, 9)
-    tbl.attach_defaults(lblDelay,   0, 2, 9,10)
-    tbl.attach_defaults(@entDelay,  2, 5, 9,10)
-    tbl.attach_defaults(lblUnit2,   5, 7, 9,10)
-    tbl.attach_defaults(lblCntTime, 0, 2,10,11)
-    tbl.attach_defaults(@entCntTime,2, 5,10,11)
-    tbl.attach_defaults(lblUnit3,   5, 7,10,11)
+    tbl.attach_defaults(lblGT,      0, 2, 8, 9)
+    tbl.attach_defaults(@entGT,     2, 5, 8, 9)
+    tbl.attach_defaults(lblGTUnit,  5, 6, 8, 9)
+    tbl.attach_defaults(lblLED_ON,  0, 2, 9,10)
+    tbl.attach_defaults(@entLED_ON, 2, 5, 9,10)
+    tbl.attach_defaults(lblUnit1,   5, 7, 9,10)
+    tbl.attach_defaults(lblDelay,   0, 2,10,11)
+    tbl.attach_defaults(@entDelay,  2, 5,10,11)
+    tbl.attach_defaults(lblUnit2,   5, 7,10,12)
+    tbl.attach_defaults(lblCntTime, 0, 2,11,12)
+    tbl.attach_defaults(@entCntTime,2, 5,11,12)
+    tbl.attach_defaults(lblUnit3,   5, 7,11,12)
 
-    tbl.attach_defaults(lblTMP,     0, 2,12,13)
-    tbl.attach_defaults(@entTMP,    2, 5,12,13)
-    tbl.attach_defaults(lblDo,      5, 6,12,13)
-    tbl.attach_defaults(@lblTVal,   6, 7,12,13)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,13,14)
-    tbl.attach_defaults(@entTMPCfga,2, 5,13,14)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,14,15)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,14,15)
+    tbl.attach_defaults(lblTMP,     0, 2,13,14)
+    tbl.attach_defaults(@entTMP,    2, 5,13,14)
+    tbl.attach_defaults(lblDo,      5, 6,13,14)
+    tbl.attach_defaults(@lblTVal,   6, 7,13,14)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,14,15)
+    tbl.attach_defaults(@entTMPCfga,2, 5,14,15)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,15,16)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,15,16)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,16,17)
-    tbl.attach_defaults(@entPumpCfg,2, 5,16,17)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,17,18)
+    tbl.attach_defaults(@entPumpCfg,2, 5,17,18)
 
     win.add(tbl)
     win.show_all()
@@ -320,7 +326,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -358,6 +364,9 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'ana_no'
         fw << "ana_no=#{@entAna.text}\n"
         set_flag[9] = true
+      when 'over_led'
+        fw << "over_led=#{(@cbOverLed.active?)?"true":"false"}\n"
+        set_flag[10] = true
       else
         fw << line
       end
@@ -373,6 +382,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "count_tm=#{@entCntTime.text.to_i}\n" if set_flag[7] == nil
     fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
     fw << "ana_no=#{@entAna.text}\n" if set_flag[9] == nil
+    fw << "over_led=#{(@cbOverLed.active?)?"true":"flase"}\n" if set_flag[10] == nil
     fw.close
 
     Gtk.main_quit()
@@ -402,14 +412,11 @@ Gtk.timeout_add( 1000 ) do
       style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
       w.lblErr.style = style
       w.lblErr.set_text("過大光検知");
-      w.cbOnOff.active = false
+      w.cbOnOff.active = false if w.cbOverLed.active?
     end
   else
     $over = 0
   end
-  # errorの場合はリセットコマンドを発行する
-  w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
-
   # 通信エラー
   if (ary[0]==0 && ary[1]==0 && ary[2]==0 && ary[3]==0)
     style = Gtk::Style.new
@@ -420,8 +427,17 @@ Gtk.timeout_add( 1000 ) do
     w.lblErr.set_text("");
   end
 
+  # gtn.rbプロセスがいなければSPIでフォトンカウントを取り込む
+  o, e, s = Open3.capture3("ps -ax")
+  unless /gtn.rb/ =~ o
+    ary = w.spi.dataRW([0x14,0x40,0x80,0xc0])
+    w.lblCount.set_text("#{((ary[1]&0x3f)<<12) + ((ary[2]&0x3f)<<6) + (ary[3]&0x3f)}")
+    # errorの場合はリセットコマンドを発行する
+    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if (ary[0]&0x20) == 0x20
   # gtnactionからフォトンカウント値を取得
-  w.lblCount.set_text("#{w.spi.foton_count}")
+  else
+    w.lblCount.set_text("#{w.spi.foton_count}")
+  end
   # 経過時刻表示
 # tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st).getutc)
@@ -438,8 +454,7 @@ Gtk.timeout_add( 1000 ) do
     ary = $led_conf.shift.split(/\s+/)
     value = ary[2]
     w.entLED.set_text(value)
-#   w.cbOnOff.active = (value.to_i>0) ? true:false
-    w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true
+    w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true if w.cbOverLed.active?
   end
 
   # 温度制御SV
@@ -457,7 +472,7 @@ Gtk.timeout_add( 1000 ) do
   # LED ON/OFF
   if ($count[2]%5) == 0
     ary = w.spi.dataRW([0x2,0x40,0x80,0xc0])
-    w.cbOnOff.active = ((ary[3]&0x01)==0 || $over>=5) ? false:true
+    w.cbOnOff.active = ((ary[3]&0x01)==0 || $over>=5) ? false:true if w.cbOverLed.active?
   end
 
   # LED制御SV
