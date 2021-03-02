@@ -126,9 +126,10 @@ struct _cnt_tbl {
 	int max;							// カウントMax値
 	time_t t;							// カウント取込み開始
 	struct timespec tim_start;			// カウント取込み開始
-#define	CNT_SZ	400
-	char buf[2000*CNT_SZ];				// 2000秒のデータバッファ
-	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
+	long tim_start_fpga;				// FPGAのカウント取込み開始時刻
+	long buf[2000];						// 2000秒のデータバッファ
+	struct timespec tm[2000];			// 取込み時刻
+	long tm_fpga[2000];					// FPGAのカウント時刻
 	int	mkflag[2000];
 } static cnt_tbl={0, 0, 0};
 
@@ -139,9 +140,10 @@ struct _cnt_dev_tbl {
 	int	rd;								// 読み込みポインタ
 	int	wr;								// 書き込みポインタ
 	int	n;								// 受信数
-#define	CNT_DEV_SZ	800
-	char buf[CNT_DEV_SZ];				// 2秒分のデータバッファ
+#define	CNT_DEV_SZ	200
+	long buf[CNT_DEV_SZ];				// 2秒分のデータバッファ
 	struct timespec	tm[CNT_DEV_SZ];		// 取込み時刻
+	long tm_fpga[CNT_DEV_SZ];			// FPGAのカウント時刻
 } static cnt_dev_tbl={{0,0}, 0, 0, 0, 0};
 
 // 動作シーケンス格納テーブル
@@ -553,84 +555,73 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
-// フォトンカウント取り込み 40msec周期に取り込む
+// フォトンカウント取り込み 10msec周期に取り込む
 static void count_dev_rcv(void)
 {
 	struct timespec tim_now=tim_get_now();
 	int over_led=0;
 	// 10msec毎にフォトンカウント取り込み
 	if (tim_timeup(tim_now, cnt_dev_tbl.exec_tim, 0)) {
-		unsigned char data[4]={0x14,0x40,0x80,0xc0};
+		unsigned char data1[4]={0x14,0x40,0x80,0xc0};// フォトンカウント(FPGAは10msec周期でPMTのフォトンをカウントしSPIで送る)
+		unsigned char data2[4]={0x15,0x40,0x80,0xc0};// FPGAのカウント時刻(FPGAはフォトンをカウントする度にこの値を1増やす 範囲は0-3ffffh)
 		pthread_mutex_lock(&shm->mutex);
-		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data1, 4);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data2, 4);
 		pthread_mutex_unlock(&shm->mutex);
-//printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
-		// データが有効なら取り込む(データが有効になるのは40msecごと)
-		if (tim_now.tv_sec>=cnt_dev_tbl.enable_tim && data[0]&0x02) {
-//		if (data[0]&0x02) {
-//printf("%s %d %02X %02X %8d %8d %10d %10d\n", __FILE__, __LINE__, data[0]&0x02, data[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec);
-//printf("%s %d %8d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
-//printf("%s %d %8d %10d %6d %02X %02X %02X %02X %d\n", __FILE__, __LINE__, tim_now.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1]&0x3f, data[2]&0x3f, data[3]&0x3f, ((data[1]&0x3f)<<12)+((data[2]&0x3f)<<6)+(data[3]&0x3f));
-			// エラー発生
-			if (data[0]&0x20) {
-				unsigned char data2[4]={0x1f,0x40,0x80,0xc0};
-				unsigned char data3[4]={0x3f,0x40,0x80,0xc1};
-				pthread_mutex_lock(&shm->mutex);
-				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data2, 4);// error flag
-				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data3, 4);// reset
-				pthread_mutex_unlock(&shm->mutex);
-				// 過大光判定
-				over_led = (data2[3]&0x02)?1:0;
-			}
-			// 過大光の場合は最下位ビットを1にする
-			if (over_led) {
-				data[0] |= 0x01;
-			}else{
-				data[0] &= ~0x01;
-			}
-			// 過大光の場合
-			if (over_led) {
-// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
-//				data[1] = 0x7f;
-//				data[2] = 0xbf;
-//				data[3] = 0xff;
-			}
-			// キャリー
-			else if (data[0]&0x08) {
-				data[1] = 0x7f;
-				data[2] = 0xbf;
-				data[3] = 0xfe;
-			}
-			// オーバーフロー
-			else if (data[0]&0x04) {
-//printf("%s %d %8d %8d %10d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_bk.tv_sec, tim_now.tv_sec, tim_bk.tv_nsec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
-//				data[1] = 0x7f;
-//				data[2] = 0xbf;
-//				data[3] = 0xfd;
-			}
 
-			// エラーがない場合でも取り込む
-		//	if ((data[0]&0x2C)==0) {
-//printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
-				cnt_dev_tbl.buf[cnt_dev_tbl.wr+0]=data[0];
-				cnt_dev_tbl.buf[cnt_dev_tbl.wr+1]=data[1];
-				cnt_dev_tbl.buf[cnt_dev_tbl.wr+2]=data[2];
-				cnt_dev_tbl.buf[cnt_dev_tbl.wr+3]=data[3];
-
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+0]=tim_now;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+1]=tim_now;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+2]=tim_now;
-				cnt_dev_tbl.tm[cnt_dev_tbl.wr+3]=tim_now;
-
-				cnt_dev_tbl.wr = (cnt_dev_tbl.wr+4)%CNT_DEV_SZ;
-
-				cnt_dev_tbl.n  += 4;
-				if (cnt_dev_tbl.n>CNT_DEV_SZ) {
-					cnt_dev_tbl.rd = (cnt_dev_tbl.rd+4)%CNT_DEV_SZ;
-					cnt_dev_tbl.n  = CNT_DEV_SZ;
-				}
-		//	}
+		// FPGAの取込み開始時刻として記録
+		if (cnt_tbl.tim_start_fpga<0) {
+			cnt_tbl.tim_start_fpga = ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
 		}
+		// エラー発生
+		if (data1[0]&0x20) {
+			unsigned char data3[4]={0x1f,0x40,0x80,0xc0};
+			unsigned char data4[4]={0x3f,0x40,0x80,0xc1};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data3, 4);// error flag
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data4, 4);// reset
+			pthread_mutex_unlock(&shm->mutex);
+			// 過大光判定
+			over_led = (data3[3]&0x02)?1:0;
+		}
+//printf("%s %d %d %02X %02X %8d %8d %10d %10d %10d %10d\n", __FILE__, __LINE__, over_led, data1[0]&0x02, data1[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec, ((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f), ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f));
+		// 過大光の場合
+		if (over_led) {
+// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
+//			data1[1] = 0x7f;
+//			data1[2] = 0xbf;
+//			data1[3] = 0xff;
+		}
+		// キャリー
+		else if (data1[0]&0x08) {
+			data1[1] = 0x7f;
+			data1[2] = 0xbf;
+			data1[3] = 0xfe;
+		}
+		// オーバーフロー
+		else if (data1[0]&0x04) {
+//printf("%s %d %8d %8d %10d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_bk.tv_sec, tim_now.tv_sec, tim_bk.tv_nsec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
+//			data1[1] = 0x7f;
+//			data1[2] = 0xbf;
+//			data1[3] = 0xfd;
+		}
+
+	// エラー発生時は取り込まない場合
+	//	if ((data1[0]&0x2C)==0) {
+//printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
+		// (過大光の場合はカウントの最上位ビットを1にする)
+			cnt_dev_tbl.buf[cnt_dev_tbl.wr]=((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f) + ((over_led)?0x80000000:0);
+			cnt_dev_tbl.tm_fpga[cnt_dev_tbl.wr]=((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
+			cnt_dev_tbl.tm[cnt_dev_tbl.wr]=tim_now;
+
+			cnt_dev_tbl.wr = (cnt_dev_tbl.wr+1)%CNT_DEV_SZ;
+
+			cnt_dev_tbl.n  += 1;
+			if (cnt_dev_tbl.n>CNT_DEV_SZ) {
+				cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
+				cnt_dev_tbl.n  = CNT_DEV_SZ;
+			}
+	//	}
 		// 次回10msec後
 		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
 	}
@@ -641,17 +632,7 @@ static void count_dev_rcv(void)
 static struct timespec count_dev_reset(void)
 {
 	struct timespec ret;
-	// オーバーフローエラーが解消されるまで取り込む
-	int i;
-	pthread_mutex_lock(&shm->mutex);
-	for (i=0; i<50; i++) {
-		unsigned char data[4]={0x14,0x40,0x80,0xc0};
-		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-		if ((data[0]&0x06)==0) {
-			break;
-		}
-	}
-	pthread_mutex_unlock(&shm->mutex);
+
 	// リセット
 	cnt_dev_tbl.rd = 0;
 	cnt_dev_tbl.wr = 0;
@@ -671,13 +652,16 @@ static int count_dev_n(void)
 }
 
 // フォトンカウント取り込みバッファ読み出し
-static int count_dev_read(char *ptr, struct timespec *tm, int len)
+static int count_dev_read(long *ptr, struct timespec *tm, long *tm_fpga, int len)
 {
 	int n=0;
 	while (len>0 && cnt_dev_tbl.n>0) {
 		*ptr++ = cnt_dev_tbl.buf[cnt_dev_tbl.rd];
 		if (tm!=NULL) {
 			*tm++ = cnt_dev_tbl.tm[cnt_dev_tbl.rd];
+		}
+		if (tm_fpga!=NULL) {
+			*tm_fpga++ = cnt_dev_tbl.tm_fpga[cnt_dev_tbl.rd];
 		}
 //printf("%s %d %4d %02X %d\n", __FILE__, __LINE__, len, cnt_dev_tbl.buf[cnt_dev_tbl.rd]&0x3f, cnt_dev_tbl.rd);
 		cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
@@ -689,49 +673,32 @@ static int count_dev_read(char *ptr, struct timespec *tm, int len)
 }
 
 // buf内のカウント値の平均を求める
-static long get_1st_data(char buf[], int n)
+static long get_1st_data(long buf[], int n)
 {
 	unsigned long total=0L;
-	int l=((buf[0]&cnt_head[7])==cnt_head[4])?4:0;
-	int j, k, m;
+	int i, m;
 //printf("%s %d %d\n", __FILE__, __LINE__, n);
-	for (j=0, m=0; j<(n-3); ) {
-		if ((buf[j+0]&cnt_head[7])==cnt_head[l+0] &&
-			(buf[j+1]&cnt_head[7])==cnt_head[l+1] &&
-			(buf[j+2]&cnt_head[7])==cnt_head[l+2] &&
-			(buf[j+3]&cnt_head[7])==cnt_head[l+3]) {
-			//下3バイトの下位6ビットが測光データ18bits
-			unsigned long dat=0L;
-			for (k=0; k<3; k++) {
-//				dat += (buf[j+k+1]&0x3f) << (6*k);
-				dat += (buf[j+k+1]&0x3f) << (6*(3-1-k));
-			}
-			//過大光確認
-			if (dat==0x3ffff) {
-				return 0x3ffff;
-			}
-//printf("%s %d %4d %4d %8d %08X %02X %02X %02X\n", __FILE__, __LINE__, m, j, dat, dat, (buf[j+1]&0x3f), (buf[j+2]&0x3f), (buf[j+3]&0x3f));
-			total += dat;
-			m++;
-			j+=4;
-			l = (l+4)%8;
+	for (i=0, m=0; i<n; i++) {
+//printf("%s %d %4d %4d %10x\n", __FILE__, __LINE__, i, n, buf[i]);
+		//過大光確認
+		if (buf[i]&0x80000000) {
+			return 0x3ffff;
 		}
-		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
-		else{
-//printf("%s %d %d %02X\n", __FILE__, __LINE__, j, cnt_tbl.buf[j]&cnt_head[7]);
-			for (j=j+1; j<n; j++) {
-				if ((buf[j]&cnt_head[7])==cnt_head[0]) {
-					l=0;
-					break;
-				}
-				if ((buf[j]&cnt_head[7])==cnt_head[4]) {
-					l=4;
-					break;
-				}
-			}
-		}
+		total += buf[i];
+		m++;
 	}
 	return GATE_COUNT(total/m);
+}
+
+// 0秒からのFPGA時刻に変換する
+static long fpga_time(long tm)
+{
+	long ret=tm-cnt_tbl.tim_start_fpga;
+	// 最大時刻は18bit(0x3ffff)
+	if (cnt_tbl.tim_start_fpga>tm) {
+		ret=0x3ffff-cnt_tbl.tim_start_fpga+tm+1;
+	}
+	return ret;
 }
 
 // カウント値をファイルに保存する
@@ -741,7 +708,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	unsigned long dat_bk1=0L, dat_bk2=0L;
 	double e1=0.0, e2=0.0;
 	int ret=-1;
-	int i, j, k;
+	int i, j;
 	FILE *fp;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
@@ -751,70 +718,42 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 		if (cnt_tbl.mode==1) {
 			fprintf(fp, "no.,count,flag,n,light,time\r\n");
 		}
-		for (i=0, j=1; i<(cnt_tbl.n-3); j++) {
+		for (i=0, j=0; i<cnt_tbl.n; j++) {
 			unsigned long total=0L;
-			int l=((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4])?4:0;
-			struct timespec tm=cnt_tbl.tm[i];
 			int m=0;
 			int over_led=0;
 //printf("%s %d %4d\n", __FILE__, __LINE__, i);
-			while (i<(cnt_tbl.n-3) && tm.tv_sec==cnt_tbl.tm[i].tv_sec) {
-				if ((cnt_tbl.buf[i+0]&cnt_head[7])==cnt_head[l+0] &&
-					(cnt_tbl.buf[i+1]&cnt_head[7])==cnt_head[l+1] &&
-					(cnt_tbl.buf[i+2]&cnt_head[7])==cnt_head[l+2] &&
-					(cnt_tbl.buf[i+3]&cnt_head[7])==cnt_head[l+3]) {
-					//下3バイトの下位6ビットが測光データ18bits
-					unsigned long dat=0L;
-					for (k=0; k<3; k++) {
-						dat += (cnt_tbl.buf[i+k+1]&0x3f) << (6*(3-1-k));
-					}
-					//過大光確認(count_dev_rcv関数でビット入れ替え操作)
-					over_led = (cnt_tbl.buf[i]&0x01)?1:0;
-					// 10ms生データ出力
-					if (cnt_tbl.mode==0) {
-//						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
-						fprintf(fp, "0,%4d,%10ld,%d,%d\r\n", i+1, dat, cnt_tbl.tm[i].tv_sec, cnt_tbl.tm[i].tv_nsec);
-					}
-					// 10msecフィルタデータ出力
-					else if (cnt_tbl.mode==2) {
-						double e = f22*(double)e1 + f12*(double)e2 + f21*(double)dat_bk1 + f11*(double)dat_bk2;
-						fprintf(fp, "%4d,%10.3lf\r\n", i+1, e);
-						dat_bk2=dat_bk1;
-						dat_bk1=dat;
-						e2 = e1;
-						e1 = e;
-					}
-					// min以上max以下の値の平均値を1秒間の測定値とする
-					if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
-						total += dat;
-						m++;
-					}
-					i+=4;
-					l = (l+4)%8;
+			while (i<cnt_tbl.n && (fpga_time(cnt_tbl.tm_fpga[i])/100)==j) {
+				//過大光確認(count_dev_rcv関数でビット入れ替え操作)
+				over_led = (cnt_tbl.buf[i]&0x80000000)?1:0;
+				// 10ms生データ出力
+				if (cnt_tbl.mode==0) {
+//					fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+					fprintf(fp, "0,%4d,%10ld,%d\r\n", i+1, cnt_tbl.buf[i], cnt_tbl.tm_fpga[i]);
 				}
-				// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
-				else{
-printf("%s %d %d %02X\n", __FILE__, __LINE__, i, cnt_tbl.buf[i]&cnt_head[7]);
-					for (; i<(cnt_tbl.n-3); i++) {
-						if ((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[0]) {
-							l=0;
-							break;
-						}
-						if ((cnt_tbl.buf[i]&cnt_head[7])==cnt_head[4]) {
-							l=4;
-							break;
-						}
-					}
-//printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&cnt_head[7]);
+				// 10msecフィルタデータ出力
+				else if (cnt_tbl.mode==2) {
+					double e = f22*(double)e1 + f12*(double)e2 + f21*(double)dat_bk1 + f11*(double)dat_bk2;
+					fprintf(fp, "%4d,%10.3lf\r\n", i+1, e);
+					dat_bk2=dat_bk1;
+					dat_bk1=cnt_tbl.buf[i];
+					e2 = e1;
+					e1 = e;
 				}
+				// min以上max以下の値の平均値を1秒間の測定値とする
+				if (cnt_tbl.buf[i]>=cnt_tbl.min && cnt_tbl.buf[i]<=cnt_tbl.max) {
+					total += cnt_tbl.buf[i];
+					m++;
+				}
+				i++;
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%4d,%10ld,%d,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, tm.tv_sec);
+				fprintf(fp, "%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 10ms生データ出力
 			else if (cnt_tbl.mode==0) {
-				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, tm.tv_sec);
+				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 		}
 		fclose(fp);
@@ -1105,6 +1044,7 @@ static int sequence(int sock, int no)
 
 			cnt_tbl.t = t;
 			cnt_tbl.tim_start=count_dev_reset();	// リセット&取込み開始時刻の取得
+			cnt_tbl.tim_start_fpga = -1;
 			memset(cnt_tbl.mkflag, 0, sizeof(cnt_tbl.mkflag));
 		}
 		pseq->current++;
@@ -1221,8 +1161,8 @@ static int sequence(int sock, int no)
 	if (cnt_tbl.busy==1) {
 		// カウント取込み
 		int n=count_dev_n();
-		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
-			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], n);
+		if ((cnt_tbl.n+n)<2000) {
+			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], &cnt_tbl.tm_fpga[cnt_tbl.n], n);
 			cnt_tbl.n+=n;
 		}
 
@@ -1232,7 +1172,7 @@ static int sequence(int sock, int no)
 		}
 		// 1秒ごとの表示
 		else if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.sec+1)*1000)) {
-			shm->count=(cnt_tbl.n>25)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-25], 25):0L;
+			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100):0L;
 			cnt_tbl.sec += 1;
 			sprintf(str, "取込:%lu秒 :%ld", cnt_tbl.sec, shm->count);
 			message(sock, no, 1, 3, str);
@@ -1520,8 +1460,8 @@ static int execute(int sock)
 			// カウント取り込みが非動作であればここでデータを取り込む
 			if (cnt_tbl.busy==0) {
 				int n=count_dev_n();
-				count_dev_read(buf, NULL, n);
-				shm->count=get_1st_data(buf, n);
+				count_dev_read((long*)buf, NULL, NULL, n);
+				shm->count=get_1st_data((long*)buf, n);
 
 			//	sprintf(str, "%03X %.2f℃", led_conf, temp);
 				sprintf(str, "%d℃   %ld", temp, shm->count);
