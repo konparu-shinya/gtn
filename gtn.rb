@@ -105,7 +105,8 @@ $act_hash_dcm = {
   0x2 => 'Step方向(msec)',
   0x3 => 'Step方向',
   0x4 => 'Home方向(msec)',
-  0x5 => 'Home方向'
+  0x5 => 'Home方向',
+  0x6 => 'モーターの停止待ち'
 }
 
 $act_hash_dio = {

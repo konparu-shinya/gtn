@@ -49,6 +49,7 @@ struct _seq_tbl {
 	int	busy;					// 1:Wait中
 	int	run_line;				// 実行中のline番号
 	struct timespec wai_start;	// Wait開始
+	int stop_req;				// スレーブと連動するための停止要求
 } static seq_tbl[CONSOLE_MAX]={
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
@@ -77,7 +78,7 @@ struct _action_tbl {
 // イベント
 static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
-static struct timespec tim_start;
+static struct timespec tim_start={0,0}, stop_timer={0,0};
 
 #define CAN_NAME "can0"
 #define	ID	0x10
@@ -377,13 +378,13 @@ static int sequence(int sock, int no, int can)
 	struct _slv_tbl *pslv    = &slv_tbl[pact->slvno];
 	int local_ret_line       = pact->line+1;
 
-//printf("%s %d %d %d %d\n", __FILE__, __LINE__, no, pseq->current, pact->slvno);
 	switch (pact->act) {
 	case 0x01:		// DCモーター初期化
 	case 0x02:		// DCモーターCW(回転時間指定)
 	case 0x03:		// DCモーターCW(STEPセンサーまで回転)
 	case 0x04:		// DCモーターCCW(回転時間指定)
 	case 0x05:		// DCモーターCCW(HOMEセンサーまで回転)
+	case 0x06:		// DCモーター停止までまつ
 		{
 			unsigned char mno;
 			switch (pact->mno) {
@@ -393,16 +394,24 @@ static int sequence(int sock, int no, int can)
 			}
 			/* スレーブ動作完了 */
 			if (pslv->busy==2) {
-				pslv->busy=0;
-				pseq->current++;
+				/* DCモーター停止までまつ */
+				if (pact->act==0x06 || pact->act==0x01) {
+					pslv->busy=0;
+					pseq->current++;
+				}
 				break;
 			}
 			/* スレーブが動作中の場合は動作を待つ */	
 			else if (pslv->busy) {
 				break;
 			}
+			/* DCモーター停止までまつ */
+			if (pact->act==0x06) {
+				// 何もしない
+				break;
+			}
 			/* Action */
-			if (can_action_send(can, mno, pact)) {
+			else if (can_action_send(can, mno, pact)) {
 				sprintf(str, "ERR 行番号 = %d CAN Error", pact->line);
 				message(sock, no, 1, 1, str);
 				pseq->run = 0;
@@ -411,6 +420,10 @@ static int sequence(int sock, int no, int can)
 				pslv->req=2;
 				pslv->busy=1;
 				pslv->no=no;
+			}
+			/* DCモーター初期化以外 */
+			if (pact->act!=0x01) {
+				pseq->current++;
 			}
 		}
 		break;
@@ -437,9 +450,12 @@ static int sequence(int sock, int no, int can)
 			}
 			/* スレーブ動作完了 */
 			if (pslv->busy==2) {
-				pslv->busy=0;
-				pseq->current++;
-				break;
+				/* パルスモーター停止までまつ */
+				if (pact->act==0x16 || pact->act==0x11) {
+					pslv->busy=0;
+					pseq->current++;
+					break;
+				}
 			}
 			/* スレーブが動作中の場合は動作を待つ */	
 			else if (pslv->busy) {
@@ -448,6 +464,7 @@ static int sequence(int sock, int no, int can)
 			/* パルスモーター停止までまつ */
 			if (pact->act==0x16) {
 				// 何もしない
+				break;
 			}
 			/* Action */
 			else if (can_action_send(can, mno, pact)) {
@@ -460,7 +477,10 @@ static int sequence(int sock, int no, int can)
 				pslv->busy=1;
 				pslv->no=no;
 			}
-			//pseq->current++;
+			/* パルスモーター初期化以外 */
+			if (pact->act!=0x11) {
+				pseq->current++;
+			}
 		}
 		break;
 	case 0x41:		// DIO指定ビットON
@@ -684,6 +704,10 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			break;
 		}
 	}
+	// 停止監視タイマーSTOP
+	if (!run_flag) {
+		stop_timer.tv_sec=0;
+	}
 
 	// パルスモーター設定
 	if (id==0xC101 && can>=0 && run_flag==0) {
@@ -721,7 +745,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 		pact->ratio       = ((int)((unsigned char)buf[24])<<8) + (int)((unsigned char)buf[25]);
 		memset(pact->cmd, 0xff, sizeof(pact->cmd));
 		memcpy(pact->cmd, buf, 0x22);
-printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
+//printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
 		pseq->max_line++;
 	}
 	// 動作準備
@@ -732,6 +756,7 @@ printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
 			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
 			memset(pseq, 0, sizeof(seq_tbl));
 			memset(event, 0, sizeof(event));
+			memset(slv_tbl, 0, sizeof(slv_tbl));
 			message(sock, no, 1, 1, "START");
 			message(sock, no, 1, 2, "");
 			message(sock, no, 1, 3, "");
@@ -754,6 +779,7 @@ printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
 			pseq->ret_line     = (int)((unsigned char)buf[3]);
 			pseq->run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
 			pseq->run          = 1;
+			pseq->stop_req     = 0;
 			message(sock, no, 1, 1, "RUN");
 			tim_start=tim_get_now();
 
@@ -770,21 +796,13 @@ printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
 		if (no==0) {
 			for (i=0; i<CONSOLE_MAX; i++) {
 				struct _seq_tbl *pseq = &seq_tbl[i];
-				struct _action_tbl *pact = &action_tbl[i][pseq->current];
-				if (pseq->run) {
-					pseq->run = 0;
-					sprintf(str, "STOP 行番号 = %d", pact->line);
-					message(sock, i+1, 1, 1, str);
-				}
+				pseq->stop_req=1;
 			}
 		}
 		// 指定スレッド停止
 		else {
 			struct _seq_tbl *pseq = &seq_tbl[no-1];
-			struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
-			pseq->run = 0;
-			sprintf(str, "STOP 行番号 = %d", pact->line);
-			message(sock, no, 1, 1, str);
+			pseq->stop_req=1;
 		}
 	}
 	// スレッド生成
@@ -803,8 +821,6 @@ static int execute(int sock, int can)
 	int i, n, len=1;
 	struct timespec tim_last=tim_get_now();
 
-	memset(slv_tbl, 0, sizeof(slv_tbl));
-
 	while (len!=0) {
 		// CAN Sokcet
 		if (can>=0) {
@@ -817,7 +833,7 @@ static int execute(int sock, int can)
 					struct _slv_tbl *pslv = &slv_tbl[rid];
 					struct _seq_tbl *pseq = &seq_tbl[pslv->no-1];
 					struct _action_tbl *pact = &action_tbl[pslv->no-1][pseq->current];
-//printf("%s %d %d\n", __FILE__, __LINE__, rid);
+//printf("%s %d %d %d\n", __FILE__, __LINE__, rid, pslv->busy);
 					switch (pslv->busy) {
 					case 1:		// PPM Busy
 						pslv->busy=2;
@@ -868,8 +884,35 @@ static int execute(int sock, int can)
 
 		// シーケンス
 		for (i=0; i<CONSOLE_MAX; i++) {
-			if (seq_tbl[i].run) {
-				sequence(sock, i+1, can);
+			struct _seq_tbl *pseq = &seq_tbl[i];
+			if (pseq->run) {
+				// STOP
+				if (pseq->stop_req) {
+					int j;
+					int busy_flag=0;
+					// 停止監視タイマースタート
+					if (stop_timer.tv_sec==0) {
+						stop_timer=tim_get_now();
+					}
+					// 指定スレッドのスレーブ動作状況を確認する
+					for (j=0; j<30; j++) {
+						if (slv_tbl[j].no==(i+1) && slv_tbl[j].busy==1) {
+							busy_flag=1;
+							break;
+						}
+					}
+					// スレーブ停止もしくは10秒経過した場合に停止処理
+					if (!busy_flag || tim_timeup(tim_get_now(), stop_timer, 10000)) {
+						struct _action_tbl *pact = &action_tbl[i][pseq->current];
+						pseq->run = 0;
+						sprintf(str, "STOP 行番号 = %d", pact->line);
+						message(sock, i+1, 1, 1, str);
+					}
+				}
+				// RUN
+				else{
+					sequence(sock, i+1, can);
+				}
 			}
 		}
 	}
