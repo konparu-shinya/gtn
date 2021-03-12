@@ -685,16 +685,17 @@ static int count_dev_read(long *ptr, struct timespec *tm, long *tm_fpga, int len
 }
 
 // buf内のカウント値の平均を求める
-static long get_1st_data(long buf[], int n)
+static long get_1st_data(long buf[], int n, int *psts)
 {
 	unsigned long total=0L;
 	int i, m;
+	*psts=0;
 //printf("%s %d %d\n", __FILE__, __LINE__, n);
 	for (i=0, m=0; i<n; i++) {
 //printf("%s %d %4d %4d %10x\n", __FILE__, __LINE__, i, n, buf[i]);
 		//過大光確認
 		if (buf[i]&0x80000000) {
-			return 0x3ffff;
+			*psts=1;
 		}
 		total += buf[i];
 		m++;
@@ -1217,12 +1218,13 @@ static int sequence(int sock, int no)
 		}
 		// 1秒ごとの表示
 		else if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.sec+1)*1000)) {
-			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100):0L;
+			int sts=0;
+			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100, &sts):0L;
 			cnt_tbl.sec += 1;
-			sprintf(str, "取込:%lu秒 :%ld", cnt_tbl.sec, shm->count);
+			sprintf(str, "取込:%lu秒 :%ld %s", cnt_tbl.sec, shm->count, (sts)?"過大光":"");
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, cnt_tbl.sec, shm->count);
+			sprintf(str, "%d℃   取込:%lu秒 :%ld %s", temp, cnt_tbl.sec, shm->count, (sts)?"過大光":"");
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -1505,12 +1507,13 @@ static int execute(int sock)
 
 			// カウント取り込みが非動作であればここでデータを取り込む
 			if (cnt_tbl.busy==0) {
+				int sts=0;
 				int n=count_dev_n();
 				count_dev_read((long*)buf, NULL, NULL, n);
-				shm->count=get_1st_data((long*)buf, n);
+				shm->count=get_1st_data((long*)buf, n, &sts);
 
 			//	sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%d℃   %ld", temp, shm->count);
+				sprintf(str, "%d℃   %ld %s", temp, shm->count, (sts)?"過大光":"");
 				message(sock, 0, 1, 1, str);
 			}
 
