@@ -53,6 +53,8 @@ CancelEd = '=無効終了'
 
 ADDevFile = '/dev/adm686z'
 
+$ana_no = '0'
+
 $sio_dev = Array.new( 20, nil )
 #$fd_ad   = nil
 #$ad_log  = nil
@@ -103,7 +105,8 @@ $act_hash_dcm = {
   0x2 => 'Step方向(msec)',
   0x3 => 'Step方向',
   0x4 => 'Home方向(msec)',
-  0x5 => 'Home方向'
+  0x5 => 'Home方向',
+  0x6 => 'モーターの停止待ち'
 }
 
 $act_hash_dio = {
@@ -128,7 +131,8 @@ $act_hash_adc = {
   0x71 => 'カウント取込み',
   0x72 => 'カウント取込(10ms)',
   0x73 => 'カウント取込(フィルタ)',
-  0x74 => 'カウント取込終了待ち'
+  0x74 => 'カウント取込終了待ち',
+  0x75 => 'マーキングフラグ'
 }
 
 $act_hash_mp3 = {
@@ -141,7 +145,8 @@ $act_hash_led = {
   0x91 => 'LED ON',
   0x92 => 'LED OFF',
   0x93 => 'ポンプOFF',
-  0x94 => 'ポンプ吐出'
+  0x94 => 'ポンプ吐出',
+  0x95 => 'ポンプ連続'
 }
 
 def b2d( str )
@@ -488,7 +493,7 @@ class SelProject
             ary = line.chop.split(/=/)
             case ary[0]
             when 'ana_no'
-             #@enSerial.set_text( ary[1] ) if ary[1]
+              $ana_no = ary[1] if ary[1]
             when 'fact_a'
               $fact_a = ary[1].to_f if ary[1]
             when 'fact_b'
@@ -1025,7 +1030,7 @@ class Moter
     cbUse           = Gtk::CheckButton.new( '' )
     spnAdjustNNo     = Gtk::Adjustment.new( 1, 1, 64, 1, 2, 0 )
     spnBtnNNo       = Gtk::SpinButton.new( spnAdjustNNo, 0, 0 )
-    spnAdjustMNo     = Gtk::Adjustment.new( 1, 1, 3, 1, 2, 0 )
+    spnAdjustMNo     = Gtk::Adjustment.new( 1, 1, 4, 1, 2, 0 )
     spnBtnMNo       = Gtk::SpinButton.new( spnAdjustMNo, 0, 0 )
     spnAdjustInit    = Gtk::Adjustment.new( 1, 1, 9999, 1, 2, 0 )
     spnBtnInit      = Gtk::SpinButton.new( spnAdjustInit, 0, 0 )
@@ -1544,7 +1549,7 @@ class Input
     @edtPComment     = Gtk::Entry.new()
     spnAdjustNode    = Gtk::Adjustment.new( 1, 1, 64, 1, 2, 0 )
     @spnBtnNode      = Gtk::SpinButton.new( spnAdjustNode, 0, 0 )
-    spnAdjustPMNo    = Gtk::Adjustment.new( 1, 1, 3, 1, 2, 0 )
+    spnAdjustPMNo    = Gtk::Adjustment.new( 1, 1, 4, 1, 2, 0 )
     @spnBtnPMNo      = Gtk::SpinButton.new( spnAdjustPMNo, 0, 0 )
     @cmbPAction      = Gtk::Combo.new()
     spnAdjustPPulse  = Gtk::Adjustment.new( 0, -99999, 99999, 1, 2, 0 )
@@ -1650,7 +1655,7 @@ class Input
 
     # Edit Wait new
     @edtWComment  = Gtk::Entry.new()
-    spnWTimes     = Gtk::Adjustment.new( 1, 1, 99999, 1, 2, 0 )
+    spnWTimes     = Gtk::Adjustment.new( 1, 1, 3600000, 1, 2, 0 )
     @spnBtnWTimes = Gtk::SpinButton.new( spnWTimes, 0, 0 )
     btnWWrite     = Gtk::Button.new( '書込み' )
 
@@ -3304,11 +3309,12 @@ Gtk.timeout_add( 200 ) do
       if msg =~ /FILE/
         file = msg.split(/\s/)[-1]
         name = msg.split(/\//)[-1]
+
         # gmail送信
         gmail = Gmail.connect("aandtrandd@gmail.com","yvtogiqruxmurtxg")
         gmail.deliver do
           to MailTo
-          subject "測定レポート:#{name}"
+          subject "#{$ana_no}号機 測定レポート:#{name}"
           #text_part do
           #  body "本文"
           #end

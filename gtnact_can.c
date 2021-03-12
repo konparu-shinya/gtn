@@ -1,5 +1,6 @@
 /********************************************************************************
- * gtnのAction実行部
+ * can版gtnのAction実行部
+ *  gcc -o gtnact_can gtnact_can.c
  ********************************************************************************/
 #include <stdio.h>
 #include <stdint.h>
@@ -15,6 +16,7 @@
 #include <linux/can/raw.h>
 
 #define QUEUELIMIT 5
+#define	CONSOLE_MAX	20
 
 #define ACK		0x06
 #define NAK		0x15
@@ -22,11 +24,18 @@
 #define ETX		0x03
 #define ENQ		0x05
 #define EOT		0x04
-#define TIMEOUT	30000
+#define TIMEOUT	3000
 
 static char ack_msg_data[] = {STX, 0x04,0x01,0x00,0x11, ETX};
                                                                 //1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
 static char msg_msg_data[] = {STX, 0x29,0x00,0x00,0xC9,0x99,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3, ETX};
+
+// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
+struct _slv_tbl {
+	int	req;			// 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
+	int busy;			// 0:停止中 1:動作中 2:動作完了
+	int no;				// CONSOLE番号
+} static slv_tbl[30];// 最大30のスレーブ
 
 // 動作管理テーブル
 struct _seq_tbl {
@@ -34,14 +43,19 @@ struct _seq_tbl {
 	int count;					// 動作中の繰り返し回数
 	int current;				// 動作中のカレント行番号
 	int max_line;				// actionテーブルの最大行数
-	int my_thread_no;			// コンソールから受け取ったスレッド番号
 	int run_times;				// コンソールから受け取った繰り返し回数
-	int ret_mode;				// 1:Step実行(動作終了時に次のlineを送信する)
-	int ret_line;				// Step実行の動作終了時に送るlineの値
-	int reg_value;				// レジスタ読み込み値の保存
-	int	slv_busy[30];			// 最大30のスレーブ 0:停止中 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
-} static seq_tbl={0,0,0,0,0,0,0,0,0};
-
+	int ret_line;				// 1:Step実行(動作終了時に次のlineを送信する)
+	int reg_flag;				// レジスタ読み込み値の保存
+	int	busy;					// 1:Wait中
+	int	run_line;				// 実行中のline番号
+	struct timespec wai_start;	// Wait開始
+	int stop_req;				// スレーブと連動するための停止要求
+} static seq_tbl[CONSOLE_MAX]={
+		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
+		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
+		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},
+		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0}
+	};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -59,9 +73,12 @@ struct _action_tbl {
 	int dummy2;
 	int dummy3;
 	char cmd[40];		// 受け取った102コマンドの状態で代入するエリア
-} static action[1000];
+} static action_tbl[CONSOLE_MAX][1000];
 
-static struct timespec tim_start;
+// イベント
+static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+
+static struct timespec tim_start={0,0}, stop_timer={0,0};
 
 #define CAN_NAME "can0"
 #define	ID	0x10
@@ -94,6 +111,51 @@ static struct timespec tim_start;
 #define	SEQ_CTL_REC_GOTO_ROW	11		// 行の移動
 #define	SEQ_CTL_REC_BC_READ		12		// ﾊﾞｰｺｰﾄﾞ･ﾘｰﾀﾞｰ
 
+// 現在時刻取得
+static struct timespec tim_get_now(void)
+{
+	struct timespec tim_now;
+//	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+	clock_gettime(CLOCK_MONOTONIC, &tim_now);
+	return tim_now;
+}
+
+// tmにaddを加算する
+static struct timespec tim_add(struct timespec tm, long addmsec)
+{
+	tm.tv_nsec += ((addmsec%1000)*1000000);
+	if (tm.tv_nsec>=1000000000) {
+		tm.tv_sec += 1;
+		tm.tv_nsec -= 1000000000;
+	}
+	tm.tv_sec += (addmsec/1000);
+	return tm;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
+// 戻値 1:TimeUP
+static int tim_timeup(struct timespec t1, struct timespec t2, long msec)
+{
+	struct timespec tm = tim_add(t2, msec);
+	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻
+static struct timespec tim_diff(struct timespec t1, struct timespec t2)
+{
+	struct timespec ret={0,0};
+	if (tim_timeup(t1, t2, 0)==0) {
+		return ret;
+	}
+	if (t1.tv_sec>0 && t1.tv_nsec<t2.tv_nsec) {
+		t1.tv_nsec += 1000000000;
+		t1.tv_sec  -= 1;
+	}
+	ret.tv_sec = t1.tv_sec-t2.tv_sec;
+	ret.tv_nsec = t1.tv_nsec-t2.tv_nsec;
+	return ret;
+}
+
 // CAN送信
 static int can_send(int can, unsigned char data[])
 {
@@ -110,8 +172,9 @@ static int can_send(int can, unsigned char data[])
 // CANジグフォーマットでの送信(送信後は返信を待つ)
 static int can_jigfmt_send(int can, unsigned char sid, unsigned char repnum, unsigned char datident, unsigned char d1, unsigned char d2, unsigned char d3, unsigned char d4)
 {
+	struct timespec tim_last=tim_get_now();
 	struct can_frame frame;
-	int tm, len;
+	int len;
 #define MAX_SEQNUM 0x10
 static unsigned char seqnum = 0;
 	unsigned char data[DLC]={sid, repnum, datident, seqnum, d1, d2, d3, d4};
@@ -119,15 +182,15 @@ static unsigned char seqnum = 0;
 	can_send(can, data);
 
 	/* 返信をまつ */
-	for (tm=0; tm<TIMEOUT; tm++) {
+	while (1) {
 		len = read(can, &frame, sizeof(frame));
 		/* IDが照合できればOK */
 		if (len==sizeof(frame) && frame.can_id==sid) {
 			break;
 		}
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	return (tm<TIMEOUT) ? 0:-1;
+	return 0;
 }
 
 // スレーブへパルスモーター設定を送信する
@@ -195,12 +258,15 @@ static int can_dc_conf_send(int can, char *buf)
 }
 
 // スレーブへ1つの動作を送信する
-static int can_action_send(int can, int count, unsigned char datnum, struct _action_tbl *act)
+static int can_action_send(int can, unsigned char datnum, struct _action_tbl *act)
 {
 	unsigned char sid    = (unsigned char)act->slvno+0x10;
-	unsigned char repnum = 100 + (count%125);	// 100からの通し番号を入れたいとの事だが...
+static int count=0;
+	unsigned char repnum = 100 + count;	// 100からの通し番号を入れたいとの事だが...
 	unsigned char datident;
 	int i, ret;
+
+	count = (++count)%125;	// 0-124
 
 	ret = can_jigfmt_send(can, sid, repnum, CAN_SPLIT_INFO, 0, 0, INFO_C102_MSG, datnum);
 	if (ret) return -1;
@@ -249,41 +315,41 @@ static void nt_send(int sock, char *sbuf, int size)
 // 戻値:0:SockClose >0:STX,ETXを除いた受信長 <0:Error
 static int nt_recv(int sock, char c, char *p)
 {
-	int len, length, tm, i, count=0;
+	struct timespec tim_last=tim_get_now();
+	int len, length, i, count=0;
 	// STX
 	if (c!=STX) return -1;
 	p[count++] = c;
 
 	// length
-	for (tm=0; tm<TIMEOUT; tm++) {
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	length = (int)c;
 	p[count++] = c;
 
+	tim_last=tim_get_now();
 	for (i=1; i<length; i++) {
-		for (tm=0; tm<TIMEOUT; tm++) {
+		while (1) {
 			len = recv(sock, &c, 1, 0);
 			if (len==0) return 0;
 			if (len>0) break;
-			usleep(100);
+			if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 		}
-		if (tm>=TIMEOUT) return -1;
 		p[count++] = c;
 	}
 
 	// ETX
-	for (tm=0; tm<TIMEOUT; tm++) {
+	tim_last=tim_get_now();
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	if (c!=ETX) return -1;
 	p[count++] = c;
 
@@ -302,167 +368,63 @@ static int message(int sock, int my_thread_no, int disp_no, int line_no, char *s
 	return 0;
 }
 
-// コマンド受信処理
-static int dispatch(int sock, char *buf, int can)
-{
-static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
-	char str[32];
-	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
-
-	// パルスモーター設定
-	if (id==0xC101 && can>=0 && seq_tbl.run==0) {
-		if (can_ppm_conf_send(can, buf)) {
-			local_param_err = -1;
-		}
-		else{
-			local_param_err = 0;
-		}
-	}
-	// DCモーター設定
-	else if (id==0xC103 && can>=0 && seq_tbl.run==0) {
-		if (can_dc_conf_send(can, buf)) {
-			local_param_err = -1;
-		}
-		else{
-			local_param_err = 0;
-		}
-	}
-	// 動作シーケンス
-	else if (id==0xC102 && seq_tbl.run==0) {
-		action[seq_tbl.max_line].line        = ((int)((unsigned char)buf[6])<<8) + (int)((unsigned char)buf[7]);
-		action[seq_tbl.max_line].slvno       = (int)((unsigned char)buf[8]);
-		action[seq_tbl.max_line].mno         = (int)((unsigned char)buf[9]);
-		action[seq_tbl.max_line].act         = ((int)((unsigned char)buf[10])<<8) + (int)((unsigned char)buf[11]);
-		action[seq_tbl.max_line].move_pulse  = ((unsigned long)((unsigned char)buf[12])<<24) + ((unsigned long)((unsigned char)buf[13])<<16) + ((unsigned long)((unsigned char)buf[14])<<8) + (unsigned long)((unsigned char)buf[15]);
-		action[seq_tbl.max_line].start_pulse = ((int)((unsigned char)buf[16])<<8) + (int)((unsigned char)buf[17]);
-		action[seq_tbl.max_line].max_pulse   = ((int)((unsigned char)buf[18])<<8) + (int)((unsigned char)buf[19]);
-		action[seq_tbl.max_line].st_slope    = ((int)((unsigned char)buf[20])<<8) + (int)((unsigned char)buf[21]);
-		action[seq_tbl.max_line].ed_slope    = ((int)((unsigned char)buf[22])<<8) + (int)((unsigned char)buf[23]);
-		action[seq_tbl.max_line].ratio       = ((int)((unsigned char)buf[24])<<8) + (int)((unsigned char)buf[25]);
-		memset(action[seq_tbl.max_line].cmd, 0xff, sizeof(action[seq_tbl.max_line].cmd));
-		memcpy(action[seq_tbl.max_line].cmd, buf, 0x22);
-		seq_tbl.max_line++;
-	}
-	// 動作準備
-	else if (id==0xC014 && seq_tbl.run==0) {
-		int local_reg_value=seq_tbl.reg_value;			// レジスタ値を保存
-		memset(&seq_tbl, 0, sizeof(seq_tbl));
-
-		seq_tbl.reg_value    = local_reg_value;			// Step実行に備えてレジスタ値を復元
-		seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
-		message(sock, seq_tbl.my_thread_no, 1, 1, "START");
-		message(sock, seq_tbl.my_thread_no, 1, 2, "");
-		message(sock, seq_tbl.my_thread_no, 1, 3, "");
-	}
-	// 動作開始
-	else if (id==0xC015 && seq_tbl.run==0) {
-		if (can<0) {
-			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR CAN Socket Error");
-		}
-		else if (local_param_err) {
-			message(sock, seq_tbl.my_thread_no, 1, 1, "ERR DC/PPM Param Send Error");
-		}
-		else{
-			seq_tbl.ret_mode     = (int)((unsigned char)buf[3]);
-			seq_tbl.my_thread_no = (int)((unsigned char)buf[6]);
-			seq_tbl.run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
-			seq_tbl.run          = 1;
-			message(sock, seq_tbl.my_thread_no, 1, 1, "RUN");
-			clock_gettime(CLOCK_MONOTONIC, &tim_start);
-		}
-	}
-	// 動作停止
-	else if (id==0xC016 && seq_tbl.run) {
-		seq_tbl.run = 0;
-		sprintf(str, "STOP 行番号 = %d", action[seq_tbl.current].line);
-		message(sock, seq_tbl.my_thread_no, 1, 1, str);
-	}
-	// スレッド生成
-	else if (id==0xC012) {
-	}
-	// スレッド停止
-	else if (id==0xC013) {
-	}
-	return 0;
-}
-
-// シーケンスの終了確認
-static int check_finish(int sock)
-{
-	char str[32];
-
-	/* まず終了判定 */
-	if (seq_tbl.current >= seq_tbl.max_line) {
-		/* 経過時間を表示する */
-		time_t msec;
-		long sec;
-		struct timespec tim_end;
-		clock_gettime(CLOCK_MONOTONIC, &tim_end);
-		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
-			tim_end.tv_nsec += 1000000000;
-			tim_end.tv_sec  -= 1;
-		}
-		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
-		sec  = tim_end.tv_sec - tim_start.tv_sec;
-
-		sprintf(str, "Loop:%d Time:%lu.%lu秒", seq_tbl.count+1, sec, msec/100);
-		message(sock, seq_tbl.my_thread_no, 1, 2, str);
-
-
-		seq_tbl.count++;
-		// 終了
-		if (seq_tbl.count >= seq_tbl.run_times) {
-			seq_tbl.run = 0;
-			message(sock, seq_tbl.my_thread_no, 1, 1, "success!!");
-			/* 次の行番号を送る */
-			if (seq_tbl.ret_mode) {
-				sprintf(str, "%d", seq_tbl.ret_line);
-				message(sock, seq_tbl.my_thread_no, 2, 0, str);
-			}
-		}
-		// Next
-		else{
-			seq_tbl.current = 0;
-		}
-	}
-	return 0;
-}
-
 // シーケンス
-static int sequence(int sock, int can)
+static int sequence(int sock, int no, int can)
 {
-    int i;
-	char str[32];
+	int i, error=0;
+	char str[64];
+	struct _seq_tbl *pseq = &seq_tbl[no-1];
+	struct _action_tbl *pact = &action_tbl[no-1][pseq->current];
+	struct _slv_tbl *pslv    = &slv_tbl[pact->slvno];
+	int local_ret_line       = pact->line+1;
 
-	seq_tbl.ret_line=0;
-	switch (action[seq_tbl.current].act) {
+	switch (pact->act) {
 	case 0x01:		// DCモーター初期化
 	case 0x02:		// DCモーターCW(回転時間指定)
 	case 0x03:		// DCモーターCW(STEPセンサーまで回転)
 	case 0x04:		// DCモーターCCW(回転時間指定)
 	case 0x05:		// DCモーターCCW(HOMEセンサーまで回転)
+	case 0x06:		// DCモーター停止までまつ
 		{
 			unsigned char mno;
-			switch (action[seq_tbl.current].mno) {
+			switch (pact->mno) {
 			case 1: mno = SEQ_CTL_REC_DCM_1; break;
 			case 2: mno = SEQ_CTL_REC_DCM_2; break;
 			default: mno = SEQ_CTL_REC_DCM_3; break;
 			}
+			/* スレーブ動作完了 */
+			if (pslv->busy==2) {
+				/* DCモーター停止までまつ */
+				if (pact->act==0x06 || pact->act==0x01) {
+					pslv->busy=0;
+					pseq->current++;
+				}
+				break;
+			}
 			/* スレーブが動作中の場合は動作を待つ */	
-			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
-				usleep(50000);
+			else if (pslv->busy) {
+				break;
+			}
+			/* DCモーター停止までまつ */
+			if (pact->act==0x06) {
+				// 何もしない
 				break;
 			}
 			/* Action */
-			if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
-				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
-				message(sock, seq_tbl.my_thread_no, 1, 1, str);
-				seq_tbl.run = 0;
+			else if (can_action_send(can, mno, pact)) {
+				sprintf(str, "ERR 行番号 = %d CAN Error", pact->line);
+				message(sock, no, 1, 1, str);
+				pseq->run = 0;
 			}
 			else{
-				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=2;
+				pslv->req=2;
+				pslv->busy=1;
+				pslv->no=no;
 			}
-			seq_tbl.current++;
+			/* DCモーター初期化以外 */
+			if (pact->act!=0x01) {
+				pseq->current++;
+			}
 		}
 		break;
 	case 0x11:		// パルスモーター初期化
@@ -481,30 +443,44 @@ static int sequence(int sock, int can)
 //	case 0x36:		// パルスモーターI/O 16bitデータ読み込んで表示
 		{
 			unsigned char mno;
-			switch (action[seq_tbl.current].mno) {
+			switch (pact->mno) {
 			case 1: mno = SEQ_CTL_REC_PSM_1; break;
 			case 2: mno = SEQ_CTL_REC_PSM_2; break;
 			default: mno = SEQ_CTL_REC_PSM_3; break;
 			}
+			/* スレーブ動作完了 */
+			if (pslv->busy==2) {
+				/* パルスモーター停止までまつ */
+				if (pact->act==0x16 || pact->act==0x11) {
+					pslv->busy=0;
+					pseq->current++;
+					break;
+				}
+			}
 			/* スレーブが動作中の場合は動作を待つ */	
-			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
-				usleep(50000);
+			else if (pslv->busy) {
 				break;
 			}
 			/* パルスモーター停止までまつ */
-			if (action[seq_tbl.current].act==0x16) {
+			if (pact->act==0x16) {
 				// 何もしない
+				break;
 			}
 			/* Action */
-			else if (can_action_send(can, seq_tbl.current, mno, &action[seq_tbl.current])) {
-				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
-				message(sock, seq_tbl.my_thread_no, 1, 1, str);
-				seq_tbl.run = 0;
+			else if (can_action_send(can, mno, pact)) {
+				sprintf(str, "ERR 行番号 = %d CAN Error", pact->line);
+				message(sock, no, 1, 1, str);
+				pseq->run = 0;
 			}
 			else{
-				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=1;
+				pslv->req=1;
+				pslv->busy=1;
+				pslv->no=no;
 			}
-			seq_tbl.current++;
+			/* パルスモーター初期化以外 */
+			if (pact->act!=0x11) {
+				pseq->current++;
+			}
 		}
 		break;
 	case 0x41:		// DIO指定ビットON
@@ -515,7 +491,7 @@ static int sequence(int sock, int can)
 	case 0x46:		// DIO 32bitデータ読み込んで表示
 		{
 			unsigned char dno;
-			switch (action[seq_tbl.current].act) {
+			switch (pact->act) {
 			case 0x41: dno = SEQ_CTL_REC_DO_1; break;
 			case 0x42: dno = SEQ_CTL_REC_DO_1; break;
 			case 0x43: dno = SEQ_CTL_REC_DI_1; break;
@@ -523,83 +499,105 @@ static int sequence(int sock, int can)
 			case 0x45: dno = SEQ_CTL_REC_DO_32; break;
 			default: dno = SEQ_CTL_REC_DI_32; break;
 			}
+			/* スレーブ動作完了 */
+			if (pslv->busy==2) {
+				pslv->busy=0;
+				pseq->current++;
+				break;
+			}
 			/* スレーブが動作中の場合は動作を待つ */	
-			if (seq_tbl.slv_busy[action[seq_tbl.current].slvno]) {
-				usleep(500);
+			else if (pslv->busy) {
 				break;
 			}
 			/* Action */
-			if (can_action_send(can, seq_tbl.current, dno, &action[seq_tbl.current])) {
-				sprintf(str, "ERR 行番号 = %d CAN Error", action[seq_tbl.current].line);
-				message(sock, seq_tbl.my_thread_no, 1, 1, str);
-				seq_tbl.run = 0;
+			if (can_action_send(can, dno, pact)) {
+				sprintf(str, "ERR 行番号 = %d CAN Error", pact->line);
+				message(sock, no, 1, 1, str);
+				pseq->run = 0;
 			}
 			/* DIO 32bitデータ読み込んで表示 */
-			else if (action[seq_tbl.current].act==0x46) {
-				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=12;
+			else if (pact->act==0x46) {
+				pslv->req=12;
+				pslv->busy=1;
+				pslv->no=no;
 			}
 			/* DIO 32bitデータ読み込んで表示 以外 */
 			else{
-				seq_tbl.slv_busy[action[seq_tbl.current].slvno]=11;
+				pslv->req=11;
+				pslv->busy=1;
+				pslv->no=no;
 			}
-			/* 	I/Oは動作完了するまで進めないのでコメントにする */
-			//seq_tbl.current++;
 		}
 		break;
 	case 0x51:		// 指定時間まち(×10msec)
-		usleep(action[seq_tbl.current].move_pulse*1000);
-		seq_tbl.current++;
+		if (pseq->busy==0) {
+			pseq->busy=1;
+			pseq->wai_start=tim_get_now();
+		}
+		else{
+			struct timespec tim_now=tim_get_now();
+			if (tim_timeup(tim_now, pseq->wai_start, pact->move_pulse)) {
+				struct timespec tim=tim_diff(tim_now, pseq->wai_start);
+				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
+				pseq->busy=0;
+				pseq->current++;
+			}
+		}
 		break;
 	case 0x52:		// if文
 		/* 条件が揃えば指定行へ */
-		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)==(unsigned short)action[seq_tbl.current].max_pulse) {
-			seq_tbl.ret_line=action[seq_tbl.current].move_pulse;
-			/* goto先を探す */
-       		for (i=0; i<seq_tbl.max_line; i++) {
-				if (action[seq_tbl.current].move_pulse==action[i].line) {
-					seq_tbl.current = i;
+		if (((unsigned short)pseq->reg_flag & (unsigned short)pact->start_pulse)==(unsigned short)pact->max_pulse) {
+			pseq->current++;
+			local_ret_line=pact->move_pulse;
+
+       		for (i=0; i<pseq->max_line; i++) {
+				struct _action_tbl *next = &action_tbl[no-1][i];
+				if (pact->move_pulse==next->line) {
+					pseq->current = i;
     	           	break;
         	   	}
        		}
-			/* goto先が見つからなければ次の行へ */
-			if (i>=seq_tbl.max_line) {
-				seq_tbl.current++;
-			}
 		}
 		/* 次の行へ */
 		else{
-			seq_tbl.current++;
+			pseq->current++;
 		}
 		break;
 	case 0x53:		// unless文
-		if (((unsigned short)seq_tbl.reg_value & (unsigned short)action[seq_tbl.current].start_pulse)!=(unsigned short)action[seq_tbl.current].max_pulse) {
-			seq_tbl.ret_line=action[seq_tbl.current].move_pulse;
-			/* goto先を探す */
-       		for (i=0; i<seq_tbl.max_line; i++) {
-				if (action[seq_tbl.current].move_pulse==action[i].line) {
-					seq_tbl.current = i;
+		if (((unsigned short)pseq->reg_flag & (unsigned short)pact->start_pulse)!=(unsigned short)pact->max_pulse) {
+			pseq->current++;
+			local_ret_line=pact->move_pulse;
+
+       		for (i=0; i<pseq->max_line; i++) {
+				struct _action_tbl *next = &action_tbl[no-1][i];
+				if (pact->move_pulse==next->line) {
+					pseq->current = i;
     	           	break;
         	   	}
        		}
-			/* goto先が見つからなければ次の行へ */
-			if (i>=seq_tbl.max_line) {
-				seq_tbl.current++;
-			}
 		}
 		/* 次の行へ */
 		else{
-			seq_tbl.current++;
+			pseq->current++;
 		}
 		break;
 	case 0x54:		// 最終行へ移動
-		if (seq_tbl.max_line>0) {
-			seq_tbl.current = seq_tbl.max_line-1;
+		if (pseq->max_line>0 && pseq->ret_line==0) {
+			pseq->current = pseq->max_line-1;
 		}
+		else{
+			pseq->current++;
+		}
+		local_ret_line=-1;
 		break;
 	case 0x55:		// 指定行へ移動
-       	for (i=0; i<seq_tbl.max_line; i++) {
-			if (action[seq_tbl.current].move_pulse==action[i].line) {
-				seq_tbl.current = i;
+		pseq->current++;
+		local_ret_line=pact->move_pulse;
+
+       	for (i=0; i<pseq->max_line; i++) {
+			struct _action_tbl *next = &action_tbl[no-1][i];
+			if (pact->move_pulse==next->line) {
+				pseq->current = i;
                	break;
            	}
        	}
@@ -607,107 +605,315 @@ static int sequence(int sock, int can)
 	case 0x56:		// SIO送信
 		break;
 	case 0x57:		// エラー停止
-		sprintf(str, "ERR 行番号 = %d", action[seq_tbl.current].line);
-		message(sock, seq_tbl.my_thread_no, 1, 1, str);
-		seq_tbl.run = 0;
+		sprintf(str, "ERR 行番号 = %d", pact->line);
+		message(sock, no, 1, 1, str);
+		error=1;
 		break;
 	case 0x61:		// イベントセット
+        event[pact->move_pulse-1]=1;
+		pseq->current++;
 		break;
 	case 0x62:		// イベントクリア
+        event[pact->move_pulse-1]=0;
+		pseq->current++;
 		break;
 	case 0x63:		// イベントセットまち
+        if (event[pact->move_pulse-1]) {
+		    pseq->current++;
+        }
 		break;
 	case 0x64:		// いべんとクリアまち
+        if (!event[pact->move_pulse-1]) {
+		    pseq->current++;
+        }
 		break;
-	case 0x71:		// A/D取り込み
+	case 0x81:		// 音声1
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound1.mp3");
+			exit(0);
+		}
+		pseq->current++;
+		break;
+	case 0x82:		// 音声2
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound2.mp3");
+			exit(0);
+		}
+		pseq->current++;
+		break;
+	case 0x83:		// 音声3
+		if (fork()==0) {
+			execl("/usr/bin/mpg321", "mpg321", "sound3.mp3");
+			exit(0);
+		}
+		pseq->current++;
 		break;
 	default:
-		seq_tbl.current++;
+		pseq->current++;
 		break;
+	}
+
+	// 実行行の出力
+	if (pseq->run_line!=pact->line) {
+		sprintf(str, "%d", pact->line);
+		message(sock, no, 3, 1, str);
+	}
+	pseq->run_line=pact->line;
+
+	// 終了判定
+	if (pseq->current >= pseq->max_line || error) {
+		/* 経過時間を表示する */
+		struct timespec tim=tim_diff(tim_get_now(), tim_start);
+		sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
+		message(sock, no, 1, 2, str);
+
+		pseq->count++;
+		// 終了
+		if (pseq->count >= pseq->run_times || error) {
+			pseq->run = 0;
+			if (error==0) {
+				message(sock, no, 1, 1, "success!!");
+			}
+			/* 次の行番号を送る */
+			if (pseq->ret_line) {
+				sprintf(str, "%d", local_ret_line);
+				message(sock, no, 2, 0, str);
+			}
+//printf("%s %d %d %d\n", __FILE__, __LINE__, pseq->ret_line, local_ret_line);
+		}
+		// Next
+		else{
+			pseq->current = 0;
+		}
 	}
 	return 0;
 }
 
-// 全体の実行処理
+// コマンド受信処理
+static int dispatch(int sock, char *buf, int can)
+{
+static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
+static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+	char str[32];
+	unsigned short id = ((unsigned short)((unsigned char)buf[4])<<8) + (unsigned short)((unsigned char)buf[5]);
+	int i, run_flag=0;
+
+	for (i=0; i<CONSOLE_MAX; i++) {
+		if (seq_tbl[i].run) {
+			run_flag=1;
+			break;
+		}
+	}
+	// 停止監視タイマーSTOP
+	if (!run_flag) {
+		stop_timer.tv_sec=0;
+	}
+
+	// パルスモーター設定
+	if (id==0xC101 && can>=0 && run_flag==0) {
+		if (can_ppm_conf_send(can, buf)) {
+			local_param_err = -1;
+		}
+		else{
+			local_param_err = 0;
+		}
+	}
+	// DCモーター設定
+	else if (id==0xC103 && can>=0 && run_flag==0) {
+		if (can_dc_conf_send(can, buf)) {
+			local_param_err = -1;
+		}
+		else{
+			local_param_err = 0;
+		}
+	}
+
+	// 動作シーケンス
+	else if (id==0xC102 && run_flag==0) {
+		int no = (int)((unsigned char)buf[3]);
+		struct _seq_tbl *pseq = &seq_tbl[no-1];
+		struct _action_tbl *pact = &action_tbl[no-1][pseq->max_line];
+		pact->line        = ((int)((unsigned char)buf[6])<<8) + (int)((unsigned char)buf[7]);
+		pact->slvno       = (int)((unsigned char)buf[8]);
+		pact->mno         = (int)((unsigned char)buf[9]);
+		pact->act         = ((int)((unsigned char)buf[10])<<8) + (int)((unsigned char)buf[11]);
+		pact->move_pulse  = ((unsigned long)((unsigned char)buf[12])<<24) + ((unsigned long)((unsigned char)buf[13])<<16) + ((unsigned long)((unsigned char)buf[14])<<8) + (unsigned long)((unsigned char)buf[15]);
+		pact->start_pulse = ((int)((unsigned char)buf[16])<<8) + (int)((unsigned char)buf[17]);
+		pact->max_pulse   = ((int)((unsigned char)buf[18])<<8) + (int)((unsigned char)buf[19]);
+		pact->st_slope    = ((int)((unsigned char)buf[20])<<8) + (int)((unsigned char)buf[21]);
+		pact->ed_slope    = ((int)((unsigned char)buf[22])<<8) + (int)((unsigned char)buf[23]);
+		pact->ratio       = ((int)((unsigned char)buf[24])<<8) + (int)((unsigned char)buf[25]);
+		memset(pact->cmd, 0xff, sizeof(pact->cmd));
+		memcpy(pact->cmd, buf, 0x22);
+//printf("%s %d %d %d\n", __FILE__, __LINE__, pact->line, pseq->max_line);
+		pseq->max_line++;
+	}
+	// 動作準備
+	else if (id==0xC014) {
+		int no = (int)((unsigned char)buf[6]);
+		struct _seq_tbl *pseq = &seq_tbl[no-1];
+		if (pseq->run==0) {
+			local_reg_flag[no-1]=pseq->reg_flag;			// レジスタ値を保存
+			memset(pseq, 0, sizeof(seq_tbl));
+			memset(event, 0, sizeof(event));
+			memset(slv_tbl, 0, sizeof(slv_tbl));
+			message(sock, no, 1, 1, "START");
+			message(sock, no, 1, 2, "");
+			message(sock, no, 1, 3, "");
+		}
+	}
+	// 動作開始
+	else if (id==0xC015) {
+		int no = (int)((unsigned char)buf[6]);
+		struct _seq_tbl *pseq = &seq_tbl[no-1];
+		if (pseq->run) {
+			// 動作中の場合は何もしない
+		}
+		else if (can<0) {
+			message(sock, no, 1, 1, "ERR CAN Socket Error");
+		}
+		else if (local_param_err) {
+			message(sock, no, 1, 1, "ERR DC/PPM Param Send Error");
+		}
+		else{
+			pseq->ret_line     = (int)((unsigned char)buf[3]);
+			pseq->run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
+			pseq->run          = 1;
+			pseq->stop_req     = 0;
+			message(sock, no, 1, 1, "RUN");
+			tim_start=tim_get_now();
+
+			/* Step実行の場合は前回のレジスタ値に戻す */
+			if (pseq->ret_line) {
+				pseq->reg_flag=local_reg_flag[no-1];
+			}
+		}
+	}
+	// 動作停止
+	else if (id==0xC016) {
+		int no = (int)((unsigned char)buf[6]);
+		// 全停止
+		if (no==0) {
+			for (i=0; i<CONSOLE_MAX; i++) {
+				struct _seq_tbl *pseq = &seq_tbl[i];
+				pseq->stop_req=1;
+			}
+		}
+		// 指定スレッド停止
+		else {
+			struct _seq_tbl *pseq = &seq_tbl[no-1];
+			pseq->stop_req=1;
+		}
+	}
+	// スレッド生成
+	else if (id==0xC012) {
+	}
+	// スレッド停止
+	else if (id==0xC013) {
+	}
+	return 0;
+}
+
+// コンソールとのソケット送受信
 static int execute(int sock, int can)
 {
-	char buf[512], str[32];
+	char buf[1024], str[32];
+	int i, n, len=1;
+	struct timespec tim_last=tim_get_now();
 
-	while (1) {
+	while (len!=0) {
 		// CAN Sokcet
 		if (can>=0) {
 			struct can_frame frame;
 			int len = read(can, &frame, sizeof(frame));
 			if (len==sizeof(frame)) {
 				// Actionの戻りを受信する
-				if (seq_tbl.run && frame.can_id>0x10) {
-					int rid=frame.can_id-0x10;
-					switch (seq_tbl.slv_busy[rid]) {
+				if (frame.can_id>ID) {
+					int rid=frame.can_id-ID;
+					struct _slv_tbl *pslv = &slv_tbl[rid];
+					struct _seq_tbl *pseq = &seq_tbl[pslv->no-1];
+					struct _action_tbl *pact = &action_tbl[pslv->no-1][pseq->current];
+//printf("%s %d %d %d\n", __FILE__, __LINE__, rid, pslv->busy);
+					switch (pslv->busy) {
 					case 1:		// PPM Busy
-						seq_tbl.slv_busy[rid]=0;
+						pslv->busy=2;
 						break;
 					case 2:		// DC Busy
-						seq_tbl.slv_busy[rid]=0;
+						pslv->busy=2;
 						break;
 					case 11:	// I/O Busy
-						seq_tbl.slv_busy[rid]=0;
-						seq_tbl.current++;
+						pslv->busy=2;
 						break;
 					case 12:	// I/O Read Req
-						seq_tbl.slv_busy[rid]=13;
+						pslv->req=13;
 						break;
 					case 13:	// I/O Data Transfer 
-						seq_tbl.reg_value=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
-						sprintf(str, "Port %d-%d = %02X%02X %02X%02Xh", action[seq_tbl.current].slvno, action[seq_tbl.current].mno,
+						pseq->reg_flag=(((int)frame.data[4])<<24) + (((int)frame.data[5])<<16) + (((int)frame.data[6])<<8) + ((int)frame.data[7]);
+						sprintf(str, "Port %d-%d = %02X%02X %02X%02Xh", pact->slvno, pact->mno,
 																		(unsigned char)(frame.data[4]), (unsigned char)(frame.data[5]),
 																		(unsigned char)(frame.data[6]), (unsigned char)(frame.data[7]));
-						message(sock, seq_tbl.my_thread_no, 1, 3, str);
+						message(sock, pslv->no, 1, 3, str);
 
-						seq_tbl.slv_busy[rid]=0;
-						seq_tbl.current++;
+						pslv->busy=2;
 						break;
 					default:
 						break;
 					}
 				}
-		printf("%s %d %d %X\n", __FILE__,__LINE__,seq_tbl.run,frame.can_id);
 			}
 		}
 
 		// Local Sokcet
-		{
+		while (1) {
 			// STX受信 0:Close -1:nothing
 			char c;
-			int len = recv(sock, &c, 1, 0);
+			len = recv(sock, &c, 1, 0);
+
+			if (len<1) {
+				break;
+			}
 
 			// Recv
-			if (len>0) {
-				memset(buf, 0, sizeof(buf));
-				len = nt_recv(sock, c, buf);
-		printf("%s %d %d %02X %02X\n", __FILE__,__LINE__,len,(unsigned char)buf[4],(unsigned char)buf[5]);
-			}
-
+			memset(buf, 0, sizeof(buf));
+			len = nt_recv(sock, c, buf);
 			// ACK返信
-			if (len>0) {
-				nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
-			}
-
+			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
 			// コマンド割り振り
-			if (len>0) {
-				dispatch(sock, buf, can);
-			}
-
-			// Close
-			if (len==0) break;
+			dispatch(sock, buf, can);
 		}
 
-		// シーケンスの終了確認
-		if (seq_tbl.run) {
-			check_finish(sock);
-		}
 		// シーケンス
-		if (seq_tbl.run) {
-			sequence(sock, can);
+		for (i=0; i<CONSOLE_MAX; i++) {
+			struct _seq_tbl *pseq = &seq_tbl[i];
+			if (pseq->run) {
+				// STOP
+				if (pseq->stop_req) {
+					int j;
+					int busy_flag=0;
+					// 停止監視タイマースタート
+					if (stop_timer.tv_sec==0) {
+						stop_timer=tim_get_now();
+					}
+					// 指定スレッドのスレーブ動作状況を確認する
+					for (j=0; j<30; j++) {
+						if (slv_tbl[j].no==(i+1) && slv_tbl[j].busy==1) {
+							busy_flag=1;
+							break;
+						}
+					}
+					// スレーブ停止もしくは10秒経過した場合に停止処理
+					if (!busy_flag || tim_timeup(tim_get_now(), stop_timer, 10000)) {
+						struct _action_tbl *pact = &action_tbl[i][pseq->current];
+						pseq->run = 0;
+						sprintf(str, "STOP 行番号 = %d", pact->line);
+						message(sock, i+1, 1, 1, str);
+					}
+				}
+				// RUN
+				else{
+					sequence(sock, i+1, can);
+				}
+			}
 		}
 	}
 	return 0;
@@ -749,13 +955,13 @@ static int can_init(void)
 
 int main(void)
 {
-	int servSock;				//server socket descripter
-	int clitSock;				//client socket descripter
-	int on, ret;
-	struct sockaddr_in servSockAddr;	//server internet socket address
-	struct sockaddr_in clitSockAddr;	//client internet socket address
-	unsigned short servPort = 9001;		//server port number
-	unsigned int clitLen;			// client internet socket address length
+	int servSock;							//server socket descripter
+	int clitSock;							//client socket descripter
+	struct sockaddr_in servSockAddr;		//server internet socket address
+	struct sockaddr_in clitSockAddr;		//client internet socket address
+	unsigned int clitLen;					//client internet socket address length
+	unsigned short servPort = 9001;			//server port number
+	int on = 1, ret, i;
 	int canSock = can_init();
 
 	if ((servSock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 ){
@@ -763,7 +969,6 @@ int main(void)
 		exit(EXIT_FAILURE);
 	}
 	/* Enable address reuse */
-	on = 1;
 	setsockopt (servSock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 
 	memset(&servSockAddr, 0, sizeof(servSockAddr));
@@ -813,7 +1018,6 @@ int main(void)
 	if (canSock>=0) {
 		close(canSock);
 	}
-
 	return 0;
 }
 

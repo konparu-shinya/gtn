@@ -1,6 +1,7 @@
 #!/usr/bin/ruby
 
 require 'gtk2'
+require 'open3'
 require 'WiringPiSpi'
 
 Kakuchou_si   = '.pr6'
@@ -32,13 +33,13 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :time_st, :time_st2, :entLED, :cbOnOff
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed
 
   def initialize
     @spi = WiringPiSpi.new
     @spi.setup_mode(1000000, 3)
 
-    @time_st  = Time.now
+    @time_st  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @time_st2 = nil
 
     win = Gtk::Window.new()
@@ -46,6 +47,8 @@ class Window
     win.set_default_size(100,200)
     win.signal_connect(:destroy){exit_seq}
 
+    lblAna   = Gtk::Label.new("号機");
+    @entAna  = Gtk::Entry.new
     lbtn     = Gtk::Button.new.add(Gtk::Arrow.new(Gtk::Arrow::LEFT, Gtk::SHADOW_NONE))
     rbtn     = Gtk::Button.new.add(Gtk::Arrow.new(Gtk::Arrow::RIGHT, Gtk::SHADOW_NONE))
     lblLED   = Gtk::Label.new("LED電流値");
@@ -59,11 +62,14 @@ class Window
     @entLED.set_xalign(1)
     @entLED.set_text("#{@scrl.value.floor}")
     @cbOnOff  = Gtk::CheckButton.new('LED ON')
+    @cbOverLed= Gtk::CheckButton.new('過大光でLED OFF')
+    @cbOverLed.active = true
     @lblCount = Gtk::Label.new("-");
     @lblTime  = Gtk::Label.new("-");
     btnSt     = Gtk::Button.new('START')
     btnStp    = Gtk::Button.new('STOP')
     @lblTm2   = Gtk::Label.new("-");
+    @lblErr   = Gtk::Label.new("");
 
     lblGT      = Gtk::Label.new("ゲートタイム");
     @entGT     = Gtk::Entry.new
@@ -74,17 +80,17 @@ class Window
     @entLED_ON = Gtk::Entry.new
     @entLED_ON.set_text("30")
     @entLED_ON.set_xalign(1)
-    lblUnit1   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit1   = Gtk::Label.new("x0.1msec(0-99)");
     lblDelay   = Gtk::Label.new("ディレイ時間");
     @entDelay  = Gtk::Entry.new
     @entDelay.set_text("5")
     @entDelay.set_xalign(1)
-    lblUnit2   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit2   = Gtk::Label.new("x0.1msec(0-99)");
     lblCntTime = Gtk::Label.new("カウント時間");
     @entCntTime = Gtk::Entry.new
     @entCntTime.set_text("10")
     @entCntTime.set_xalign(1)
-    lblUnit3   = Gtk::Label.new("0.1msec(0-99)");
+    lblUnit3   = Gtk::Label.new("x0.1msec(0-99)");
 
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
@@ -133,6 +139,12 @@ class Window
             @entCntTime.set_text("#{ary[1]}") if ary[1]
           when 'pump'
             @entPumpCfg.set_text("#{ary[1]}") if ary[1]
+          when 'pump'
+            @entPumpCfg.set_text("#{ary[1]}") if ary[1]
+          when 'ana_no'
+            @entAna.set_text("#{ary[1]}") if ary[1]
+          when 'over_led'
+            @cbOverLed.active = ("#{ary[1]}"=="true")?true:false if ary[1]
           end
         end
       end
@@ -143,9 +155,10 @@ class Window
     set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
-    # pump
+    # pump on/off
     value = @entPumpCfg.text.to_i
-    @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+   #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+    @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
@@ -194,7 +207,7 @@ class Window
 
     btnSt.signal_connect('clicked') do 
       $led_conf = File.exist?(Led_conf) ? IO.readlines(Led_conf) : []
-      @time_st2 = Time.now
+      @time_st2 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
     btnStp.signal_connect('clicked') do 
@@ -209,51 +222,56 @@ class Window
     end
 
     @entPumpCfg.signal_connect('changed') do 
-      # pump
+      # pump on/off
       value = @entPumpCfg.text.to_i
-      @spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+     #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
+      @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
     end
 
     tbl = Gtk::Table.new(2,3,true)
     tbl.set_column_spacings(3) 
-    tbl.attach_defaults(lblLED,     0, 2, 0, 1)
-    tbl.attach_defaults(@entLED,    2, 5, 0, 1)
-    tbl.attach_defaults(@lblLVal,   6, 7, 0, 1)
-    tbl.attach_defaults(@lblLA,     7, 8, 0, 1)
-    tbl.attach_defaults(lbtn,       0, 1, 1, 2)
-    tbl.attach_defaults(@scrl,      1, 7, 1, 2)
-    tbl.attach_defaults(rbtn,       7, 8, 1, 2)
-    tbl.attach_defaults(@cbOnOff,   2, 4, 2, 3)
-    tbl.attach_defaults(@lblCount,  4, 6, 2, 3)
-    tbl.attach_defaults(@lblTime,   6, 8, 2, 3)
-    tbl.attach_defaults(btnSt,      4, 6, 3, 4)
-    tbl.attach_defaults(btnStp,     4, 6, 4, 5)
-    tbl.attach_defaults(@lblTm2,    6, 8, 3, 4)
+    tbl.attach_defaults(@entAna,    0, 5, 0, 1)
+    tbl.attach_defaults(lblAna,     5, 7, 0, 1)
+    tbl.attach_defaults(lblLED,     0, 2, 1, 2)
+    tbl.attach_defaults(@entLED,    2, 5, 1, 2)
+    tbl.attach_defaults(@lblLVal,   6, 7, 1, 2)
+    tbl.attach_defaults(@lblLA,     7, 8, 1, 2)
+    tbl.attach_defaults(lbtn,       0, 1, 2, 3)
+    tbl.attach_defaults(@scrl,      1, 7, 2, 3)
+    tbl.attach_defaults(rbtn,       7, 8, 2, 3)
+    tbl.attach_defaults(@cbOnOff,   2, 4, 3, 4)
+    tbl.attach_defaults(@lblCount,  4, 6, 3, 4)
+    tbl.attach_defaults(@lblTime,   6, 8, 3, 4)
+    tbl.attach_defaults(@cbOverLed, 2, 8, 4, 5)
+    tbl.attach_defaults(btnSt,      4, 6, 5, 6)
+    tbl.attach_defaults(btnStp,     4, 6, 6, 7)
+    tbl.attach_defaults(@lblTm2,    6, 8, 5, 6)
+    tbl.attach_defaults(@lblErr,    6, 8, 6, 7)
 
-    tbl.attach_defaults(lblGT,      0, 2, 6, 7)
-    tbl.attach_defaults(@entGT,     2, 5, 6, 7)
-    tbl.attach_defaults(lblGTUnit,  5, 6, 6, 7)
-    tbl.attach_defaults(lblLED_ON,  0, 2, 7, 8)
-    tbl.attach_defaults(@entLED_ON, 2, 5, 7, 8)
-    tbl.attach_defaults(lblUnit1,   5, 7, 7, 8)
-    tbl.attach_defaults(lblDelay,   0, 2, 8, 9)
-    tbl.attach_defaults(@entDelay,  2, 5, 8, 9)
-    tbl.attach_defaults(lblUnit2,   5, 7, 8, 9)
-    tbl.attach_defaults(lblCntTime, 0, 2, 9,10)
-    tbl.attach_defaults(@entCntTime,2, 5, 9,10)
-    tbl.attach_defaults(lblUnit3,   5, 7, 9,10)
+    tbl.attach_defaults(lblGT,      0, 2, 8, 9)
+    tbl.attach_defaults(@entGT,     2, 5, 8, 9)
+    tbl.attach_defaults(lblGTUnit,  5, 6, 8, 9)
+    tbl.attach_defaults(lblLED_ON,  0, 2, 9,10)
+    tbl.attach_defaults(@entLED_ON, 2, 5, 9,10)
+    tbl.attach_defaults(lblUnit1,   5, 7, 9,10)
+    tbl.attach_defaults(lblDelay,   0, 2,10,11)
+    tbl.attach_defaults(@entDelay,  2, 5,10,11)
+    tbl.attach_defaults(lblUnit2,   5, 7,10,12)
+    tbl.attach_defaults(lblCntTime, 0, 2,11,12)
+    tbl.attach_defaults(@entCntTime,2, 5,11,12)
+    tbl.attach_defaults(lblUnit3,   5, 7,11,12)
 
-    tbl.attach_defaults(lblTMP,     0, 2,11,12)
-    tbl.attach_defaults(@entTMP,    2, 5,11,12)
-    tbl.attach_defaults(lblDo,      5, 6,11,12)
-    tbl.attach_defaults(@lblTVal,   6, 7,11,12)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,12,13)
-    tbl.attach_defaults(@entTMPCfga,2, 5,12,13)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,13,14)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,13,14)
+    tbl.attach_defaults(lblTMP,     0, 2,13,14)
+    tbl.attach_defaults(@entTMP,    2, 5,13,14)
+    tbl.attach_defaults(lblDo,      5, 6,13,14)
+    tbl.attach_defaults(@lblTVal,   6, 7,13,14)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,14,15)
+    tbl.attach_defaults(@entTMPCfga,2, 5,14,15)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,15,16)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,15,16)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,15,16)
-    tbl.attach_defaults(@entPumpCfg,2, 5,15,16)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,17,18)
+    tbl.attach_defaults(@entPumpCfg,2, 5,17,18)
 
     win.add(tbl)
     win.show_all()
@@ -267,15 +285,16 @@ class Window
     @spi.dataRW([0x28,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
   end
 
+  # LED ON/OFF
   def set_led_on_off(active)
-    @time_st = Time.now
+    @time_st = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
     # チェックボックスが外されたらレジスタ2をOFFにする
     rd = @spi.dataRW([0x2,0x40,0x80,0xc0])
     if active == false
       @spi.dataRW([0x22,rd[1],rd[2],rd[3]&~0x01])
     else
-	  # LED電流がゼロであればセットする
+      # LED電流がゼロであればセットする
       ary = @spi.dataRW([0x08,0x40,0x80,0xc0])
       set_led_value if (ary[2]&~0x80)==0 && (ary[3]&~0xc0)==0
 
@@ -286,17 +305,18 @@ p [__LINE__, @spi.dataRW([0x2,0x40,0x80,0xc0])]
   end
 
   def set_led_config
-    # LED点灯開始
+    # LED点灯開始設定
     value = @entLED_ON.text.to_i + @entDelay.text.to_i + @entCntTime.text.to_i
     @spi.dataRW([0x31,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
-    # LED消灯開始
+    # LED消灯開始設定
     value = @entDelay.text.to_i + @entCntTime.text.to_i
     @spi.dataRW([0x32,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
-         # カウント時間
+    # カウント時間設定
     value = @entCntTime.text.to_i
     @spi.dataRW([0x30,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
   end
 
+  # 制御温度設定
   def set_temp_value
     value = @entTMP.text.to_i
     @entTMP.set_text("#{value}")
@@ -306,7 +326,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -341,6 +361,12 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'pump'
         fw << "pump=#{@entPumpCfg.text.to_i}\n"
         set_flag[8] = true
+      when 'ana_no'
+        fw << "ana_no=#{@entAna.text}\n"
+        set_flag[9] = true
+      when 'over_led'
+        fw << "over_led=#{(@cbOverLed.active?)?"true":"false"}\n"
+        set_flag[10] = true
       else
         fw << line
       end
@@ -355,6 +381,8 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "led_delay=#{@entDelay.text.to_i}\n" if set_flag[6] == nil
     fw << "count_tm=#{@entCntTime.text.to_i}\n" if set_flag[7] == nil
     fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
+    fw << "ana_no=#{@entAna.text}\n" if set_flag[9] == nil
+    fw << "over_led=#{(@cbOverLed.active?)?"true":"flase"}\n" if set_flag[10] == nil
     fw.close
 
     Gtk.main_quit()
@@ -363,10 +391,10 @@ end
 
 w = Window.new
 
-$count = 0
+$count = [0, 1, 2, 3, 4]
 $over  = 0
 Gtk.timeout_add( 1000 ) do
-  $count += 1
+  $count.map!{ |c| c+=1 }
 #p [__LINE__, $count]
 
   # 過大光は赤色で
@@ -380,19 +408,43 @@ Gtk.timeout_add( 1000 ) do
     if $over >= 5
       $led_conf = []
       w.time_st2 = nil
-      w.lblTm2.set_text("過大光検知");
-      w.cbOnOff.active = false
+      style = Gtk::Style.new
+      style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+      w.lblErr.style = style
+      w.lblErr.set_text("過大光検知");
+      w.cbOnOff.active = false if w.cbOverLed.active?
     end
   else
     $over = 0
   end
+  # 通信エラー
+  if (ary[0]==0 && ary[1]==0 && ary[2]==0 && ary[3]==0)
+    style = Gtk::Style.new
+    style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+    w.lblErr.style = style
+    w.lblErr.set_text("通信エラー");
+  elsif $over < 5
+    w.lblErr.set_text("");
+  end
+
+  # gtn.rbプロセスがいなければSPIでフォトンカウントを取り込む
+  o, e, s = Open3.capture3("ps -ax")
+  unless /gtn.rb/ =~ o
+    ary = w.spi.dataRW([0x14,0x40,0x80,0xc0])
+    w.lblCount.set_text("#{((ary[1]&0x3f)<<12) + ((ary[2]&0x3f)<<6) + (ary[3]&0x3f)}")
+    # errorの場合はリセットコマンドを発行する
+    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if (ary[0]&0x20) == 0x20
   # gtnactionからフォトンカウント値を取得
-  w.lblCount.set_text("#{w.spi.foton_count}")
+  else
+    w.lblCount.set_text("#{w.spi.foton_count}")
+  end
   # 経過時刻表示
-  tim = Time.at(Time.at(Time.now - w.time_st).getutc)
+# tim = Time.at(Time.at(Time.now - w.time_st).getutc)
+  tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st).getutc)
   w.lblTime.set_text("#{tim.strftime('%H:%M:%S')}")
   if w.time_st2
-    tim = Time.at(Time.at(Time.now - w.time_st2).getutc)
+#   tim = Time.at(Time.at(Time.now - w.time_st2).getutc)
+    tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st2).getutc)
     w.lblTm2.set_text("#{tim.strftime('%H:%M:%S')}")
   end
 
@@ -402,29 +454,37 @@ Gtk.timeout_add( 1000 ) do
     ary = $led_conf.shift.split(/\s+/)
     value = ary[2]
     w.entLED.set_text(value)
-#   w.cbOnOff.active = (value.to_i>0) ? true:false
-    w.cbOnOff.active = (ary[1] == 'OFF') ? false:true
+    w.cbOnOff.active = (ary[1] == 'OFF' || $over>=5) ? false:true if w.cbOverLed.active?
   end
 
-  if ($count%3) == 0
-    # 温度制御SV
-#   ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
-#   p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+  # 温度制御SV
+  if false
+    ary = w.spi.dataRW([0x09,0x40,0x80,0xc0])
+    p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
+  end
 
-    # 温度
+  # 温度
+  if ($count[1]%5) == 0
     ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
     w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
-    # LED ON/OFF
+  end
+
+  # LED ON/OFF
+  if ($count[2]%5) == 0
     ary = w.spi.dataRW([0x2,0x40,0x80,0xc0])
-    w.cbOnOff.active = ((ary[3]&0x01)==0) ? false:true
-    # LED制御SV
+    w.cbOnOff.active = ((ary[3]&0x01)==0 || $over>=5) ? false:true if w.cbOverLed.active?
+  end
+
+  # LED制御SV
+  if ($count[3]%5) == 0
     ary = w.spi.dataRW([0x08,0x40,0x80,0xc0])
     w.lblLVal.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
-    # LED電流
+  end
+
+  # LED電流
+  if ($count[4]%5) == 0
     ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
     w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
-    # errorの場合はリセットコマンドを発行する
-    w.spi.dataRW([0x3f,0x40,0x80,0xc1]) if ary[0] == 0x20
   end
   true
 end

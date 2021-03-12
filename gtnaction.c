@@ -1,7 +1,7 @@
 /********************************************************************************
  * gtn for ラズパイ のAction実行部
  *  パルスモーターコントローラー:L6470
- *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15)
+ *                                SPI0 CS0:GPIO17(pin11) CS1:GPIO27(pin13) CS2:GPIO22(pin15) CS3:GPIO23(pin16)
  *      R 9の設定:StepMode
  *      R10の設定:b15-b8:KVAL_HOLD b7-b0:KVAL_RUN/KVAL_ACC/KVAL_DEC
  *  DIO
@@ -61,7 +61,8 @@ struct _shm {
 #define	GPIO17	17
 #define	GPIO27	27
 #define	GPIO22	22
-const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, 0};
+#define	GPIO23	23
+const unsigned char L6470_CH[] = {GPIO17, GPIO27, GPIO22, GPIO23, 0};
 // IN/OUT
 #define	GPIO2	2
 #define	GPIO3	3
@@ -74,7 +75,7 @@ const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 
 #define QUEUELIMIT 5
 #define	CONSOLE_MAX	20
-#define	PPM_MAX	3
+#define	PPM_MAX	4
 
 #define ACK		0x06
 #define NAK		0x15
@@ -82,10 +83,13 @@ const unsigned char GPIO_CH[] = {GPIO2, GPIO3, GPIO4, GPIO5, GPIO6, GPIO13, 0};
 #define ETX		0x03
 #define ENQ		0x05
 #define EOT		0x04
-#define TIMEOUT	30000
+#define TIMEOUT	3000
 
 static const int rts=TIOCM_RTS;
-static const char cnt_head[]={0x0, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0};
+// for RS232C
+//static const char cnt_head[]={0x0, 0x20, 0x40, 0x60, 0x80, 0xa0, 0xc0, 0xe0};
+// for SPI
+static const char cnt_head[]={0x0, 0x40, 0x80, 0xc0, 0x0, 0x40, 0x80, 0xc0};
 
 static char ack_msg_data[] = {STX, 0x04,0x01,0x00,0x11, ETX};
                                                                 //1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2
@@ -110,22 +114,38 @@ struct _seq_tbl {
 		{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0},{0,0,0,0,0,0,0}
 	};
 
-// カウント管理テーブル
+// フォトンカウント管理テーブル
 struct _cnt_tbl {
-	int	busy;					// 1:カウント取込み中
-	int mode;					// 0:10ms生データ出力 1:1secごとのファイル出力 2:10msecフィルタデータ出力
-	int n;						// 取り込んだデータ数
-	int	sec;					// カウント取り込み秒数表示
-	int	times;					// カウント取り込み秒数
-	int owner;					// 指示コンソールNo.
-	int min;					// カウントMin値
-	int max;					// カウントMax値
-	time_t t;					// カウント取込み開始
-	struct timespec tim_start;	// カウント取込み開始
-	char str_start[32];			// カウント取込み開始時刻文字列
-#define	CNT_SZ	400
-	char buf[2000][CNT_SZ];		// 2000秒のデータバッファ
+	int	busy;							// 1:カウント取込み中
+	int mode;							// 0:10ms生データ出力 1:1secごとのファイル出力 2:10msecフィルタデータ出力
+	int n;								// 取り込んだデータ数
+	int	sec;							// カウント取り込み秒数表示
+	int	times;							// カウント取り込み秒数
+	int owner;							// 指示コンソールNo.
+	int min;							// カウントMin値
+	int max;							// カウントMax値
+	time_t t;							// カウント取込み開始
+	struct timespec tim_start;			// カウント取込み開始
+	long tim_start_fpga;				// FPGAのカウント取込み開始時刻
+#define	CNT_SZ	100
+	long buf[2000*CNT_SZ];				// 2000秒のデータバッファ
+	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
+	long tm_fpga[2000*CNT_SZ];			// FPGAのカウント時刻
+	int	mkflag[2000];
 } static cnt_tbl={0, 0, 0};
+
+// フォトンカウント取り込みバッファテーブル
+struct _cnt_dev_tbl {
+	struct timespec exec_tim;			// 実行時刻
+	time_t enable_tim;					// リセット後の取り込み開始時刻
+	int	rd;								// 読み込みポインタ
+	int	wr;								// 書き込みポインタ
+	int	n;								// 受信数
+#define	CNT_DEV_SZ	200
+	long buf[CNT_DEV_SZ];				// 2秒分のデータバッファ
+	struct timespec	tm[CNT_DEV_SZ];		// 取込み時刻
+	long tm_fpga[CNT_DEV_SZ];			// FPGAのカウント時刻
+} static cnt_dev_tbl={{0,0}, 0, 0, 0, 0};
 
 // 動作シーケンス格納テーブル
 struct _action_tbl {
@@ -180,6 +200,55 @@ static int event[20]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 static struct timespec tim_start;
 
+static void count_dev_rcv(void);
+
+
+// 現在時刻取得
+static struct timespec tim_get_now(void)
+{
+	struct timespec tim_now;
+//	clock_gettime(CLOCK_MONOTONIC_RAW, &tim_now);
+	clock_gettime(CLOCK_MONOTONIC, &tim_now);
+	return tim_now;
+}
+
+// tmにaddを加算する
+static struct timespec tim_add(struct timespec tm, long addmsec)
+{
+	tm.tv_nsec += ((addmsec%1000)*1000000);
+	if (tm.tv_nsec>=1000000000) {
+		tm.tv_sec += 1;
+		tm.tv_nsec -= 1000000000;
+	}
+	tm.tv_sec += (addmsec/1000);
+	return tm;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻 msec:観測時間(msec)
+// 戻値 1:TimeUP
+static int tim_timeup(struct timespec t1, struct timespec t2, long msec)
+{
+	struct timespec tm = tim_add(t2, msec);
+	return (t1.tv_sec>tm.tv_sec || (t1.tv_sec>=tm.tv_sec && t1.tv_nsec>=tm.tv_nsec))?1:0;
+}
+
+// 引数 t1:経過時刻 t2:起点時刻
+static struct timespec tim_diff(struct timespec t1, struct timespec t2)
+{
+	struct timespec ret={0,0};
+	if (tim_timeup(t1, t2, 0)==0) {
+		return ret;
+	}
+	if (t1.tv_sec>0 && t1.tv_nsec<t2.tv_nsec) {
+		t1.tv_nsec += 1000000000;
+		t1.tv_sec  -= 1;
+	}
+	ret.tv_sec = t1.tv_sec-t2.tv_sec;
+	ret.tv_nsec = t1.tv_nsec-t2.tv_nsec;
+	return ret;
+}
+
+
 // CRC計算
 static unsigned char calc_crc(char *sbuf, int size)
 {
@@ -203,41 +272,41 @@ static void nt_send(int sock, char *sbuf, int size)
 // 戻値:0:SockClose >0:STX,ETXを除いた受信長 <0:Error
 static int nt_recv(int sock, char c, char *p)
 {
-	int len, length, tm, i, count=0;
+	struct timespec tim_last=tim_get_now();
+	int len, length, i, count=0;
 	// STX
 	if (c!=STX) return -1;
 	p[count++] = c;
 
 	// length
-	for (tm=0; tm<TIMEOUT; tm++) {
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	length = (int)c;
 	p[count++] = c;
 
+	tim_last=tim_get_now();
 	for (i=1; i<length; i++) {
-		for (tm=0; tm<TIMEOUT; tm++) {
+		while (1) {
 			len = recv(sock, &c, 1, 0);
 			if (len==0) return 0;
 			if (len>0) break;
-			usleep(100);
+			if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 		}
-		if (tm>=TIMEOUT) return -1;
 		p[count++] = c;
 	}
 
 	// ETX
-	for (tm=0; tm<TIMEOUT; tm++) {
+	tim_last=tim_get_now();
+	while (1) {
 		len = recv(sock, &c, 1, 0);
 		if (len==0) return 0;
 		if (len>0) break;
-		usleep(100);
+		if (tim_timeup(tim_get_now(), tim_last, TIMEOUT)) return -1;
 	}
-	if (tm>=TIMEOUT) return -1;
 	if (c!=ETX) return -1;
 	p[count++] = c;
 
@@ -273,6 +342,9 @@ static int wiringPiSPIDataRW2(int ch, int cs, unsigned char *data, int len)
 		c = digitalRead(GPIO19)&0x01;
 		(*data) += (c<<(7-i));
 		delay(1);
+
+		// フォトンカウント取り込み
+		count_dev_rcv();
 	}
 }
 
@@ -351,6 +423,8 @@ static int L6470_init(unsigned char ch)
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
 	L6470_write(ch, 0);
+	L6470_write(ch, 0xc0);	// Reset
+	L6470_write(ch, 0xc0);	// Reset
 	L6470_write(ch, 0xc0);	// Reset
 	L6470_write(ch, 0xA8);	// HardHiZ
 
@@ -493,42 +567,150 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// フォトンカウント取り込み 10msec周期に取り込む
+static void count_dev_rcv(void)
+{
+	struct timespec tim_now=tim_get_now();
+	int over_led=0;
+	// 10msec毎にフォトンカウント取り込み
+	if (tim_timeup(tim_now, cnt_dev_tbl.exec_tim, 0)) {
+		unsigned char data1[4]={0x14,0x40,0x80,0xc0};// フォトンカウント(FPGAは10msec周期でPMTのフォトンをカウントしSPIで送る)
+		unsigned char data2[4]={0x15,0x40,0x80,0xc0};// FPGAのカウント時刻(FPGAはフォトンをカウントする度にこの値を1増やす 範囲は0-3ffffh)
+		pthread_mutex_lock(&shm->mutex);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data1, 4);
+		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data2, 4);
+		pthread_mutex_unlock(&shm->mutex);
+
+		// FPGAの取込み開始時刻として記録
+		if (cnt_tbl.tim_start_fpga<0) {
+			cnt_tbl.tim_start_fpga = ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
+		}
+		// エラー発生
+		if (data1[0]&0x20) {
+			unsigned char data3[4]={0x1f,0x40,0x80,0xc0};
+			unsigned char data4[4]={0x3f,0x40,0x80,0xc1};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data3, 4);// error flag
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data4, 4);// reset
+			pthread_mutex_unlock(&shm->mutex);
+			// 過大光判定
+			over_led = (data3[3]&0x02)?1:0;
+		}
+//printf("%s %d %d %02X %02X %8d %8d %10d %10d %10d %10d\n", __FILE__, __LINE__, over_led, data1[0]&0x02, data1[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec, ((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f), ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f));
+		// 過大光の場合
+		if (over_led) {
+// 過大光検知とカウント取り込みタイミングは連動していないためコメントにする
+//			data1[1] = 0x7f;
+//			data1[2] = 0xbf;
+//			data1[3] = 0xff;
+		}
+		// キャリー
+		else if (data1[0]&0x08) {
+			data1[1] = 0x7f;
+			data1[2] = 0xbf;
+			data1[3] = 0xfe;
+		}
+		// オーバーフロー
+		else if (data1[0]&0x04) {
+//printf("%s %d %8d %8d %10d %10d %6d %02X %02X %02X %02X\n", __FILE__, __LINE__, tim_bk.tv_sec, tim_now.tv_sec, tim_bk.tv_nsec, tim_now.tv_nsec, cnt_dev_tbl.n, data[0], data[1], data[2], data[3]);
+//			data1[1] = 0x7f;
+//			data1[2] = 0xbf;
+//			data1[3] = 0xfd;
+		}
+
+	// エラー発生時は取り込まない場合
+	//	if ((data1[0]&0x2C)==0) {
+//printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
+		// (過大光の場合はカウントの最上位ビットを1にする)
+			cnt_dev_tbl.buf[cnt_dev_tbl.wr]=((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f) + ((over_led)?0x80000000:0);
+			cnt_dev_tbl.tm_fpga[cnt_dev_tbl.wr]=((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
+			cnt_dev_tbl.tm[cnt_dev_tbl.wr]=tim_now;
+
+			cnt_dev_tbl.wr = (cnt_dev_tbl.wr+1)%CNT_DEV_SZ;
+
+			cnt_dev_tbl.n  += 1;
+			if (cnt_dev_tbl.n>CNT_DEV_SZ) {
+				cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
+				cnt_dev_tbl.n  = CNT_DEV_SZ;
+			}
+	//	}
+		// 次回10msec後
+		cnt_dev_tbl.exec_tim=tim_add(cnt_dev_tbl.exec_tim, 10);
+	}
+}
+
+// フォトンカウント取り込みバッファテーブルのクリア
+// 戻値:取込み開始時刻
+static struct timespec count_dev_reset(void)
+{
+	struct timespec ret;
+
+	// リセット
+	cnt_dev_tbl.rd = 0;
+	cnt_dev_tbl.wr = 0;
+	cnt_dev_tbl.n  = 0;
+	cnt_dev_tbl.exec_tim=tim_add(tim_get_now(), 10);
+	cnt_dev_tbl.enable_tim=cnt_dev_tbl.exec_tim.tv_sec+1;
+
+	ret.tv_sec=cnt_dev_tbl.enable_tim;
+	ret.tv_nsec=0;
+	return ret;
+}
+
+// フォトンカウント取り込みバッファ取り込み数
+static int count_dev_n(void)
+{
+	return cnt_dev_tbl.n;
+}
+
+// フォトンカウント取り込みバッファ読み出し
+static int count_dev_read(long *ptr, struct timespec *tm, long *tm_fpga, int len)
+{
+	int n=0;
+	while (len>0 && cnt_dev_tbl.n>0) {
+		*ptr++ = cnt_dev_tbl.buf[cnt_dev_tbl.rd];
+		if (tm!=NULL) {
+			*tm++ = cnt_dev_tbl.tm[cnt_dev_tbl.rd];
+		}
+		if (tm_fpga!=NULL) {
+			*tm_fpga++ = cnt_dev_tbl.tm_fpga[cnt_dev_tbl.rd];
+		}
+//printf("%s %d %4d %02X %d\n", __FILE__, __LINE__, len, cnt_dev_tbl.buf[cnt_dev_tbl.rd]&0x3f, cnt_dev_tbl.rd);
+		cnt_dev_tbl.rd = (cnt_dev_tbl.rd+1)%CNT_DEV_SZ;
+		cnt_dev_tbl.n--;
+		n++;
+		len--;
+	}
+	return n;
+}
+
 // buf内のカウント値の平均を求める
-static long get_1st_data(char buf[])
+static long get_1st_data(long buf[], int n)
 {
 	unsigned long total=0L;
-	int l=((buf[0]&0xe0)==cnt_head[4])?4:0;
-	int j, k, m;
-	for (j=0, m=0; j<(CNT_SZ-3); ) {
-		if ((buf[j+0]&0xe0)==cnt_head[l+0] &&
-			(buf[j+1]&0xe0)==cnt_head[l+1] &&
-			(buf[j+2]&0xe0)==cnt_head[l+2] &&
-			(buf[j+3]&0xe0)==cnt_head[l+3]) {
-			//各4バイトの下位5ビットが測光データ20bits
-			unsigned long dat=0L;
-			for (k=0; k<=3; k++) {
-				dat += (buf[j+k]&0x1f) << (5*k);
-			}
-			total += dat;
-			m++;
-			j+=4;
-			l = (l+4)%8;
+	int i, m;
+//printf("%s %d %d\n", __FILE__, __LINE__, n);
+	for (i=0, m=0; i<n; i++) {
+//printf("%s %d %4d %4d %10x\n", __FILE__, __LINE__, i, n, buf[i]);
+		//過大光確認
+		if (buf[i]&0x80000000) {
+			return 0x3ffff;
 		}
-		// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
-		else{
-			for (j=j+1; j<CNT_SZ; j++) {
-				if ((buf[j]&0xe0)==cnt_head[0]) {
-					l=0;
-					break;
-				}
-				if ((buf[j]&0xe0)==cnt_head[4]) {
-					l=4;
-					break;
-				}
-			}
-		}
+		total += buf[i];
+		m++;
 	}
 	return GATE_COUNT(total/m);
+}
+
+// 0秒からのFPGA時刻に変換する
+static long fpga_time(long tm)
+{
+	long ret=tm-cnt_tbl.tim_start_fpga;
+	// 最大時刻は18bit(0x3ffff)
+	if (cnt_tbl.tim_start_fpga>tm) {
+		ret=0x3ffff-cnt_tbl.tim_start_fpga+tm+1;
+	}
+	return ret;
 }
 
 // カウント値をファイルに保存する
@@ -538,67 +720,52 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	unsigned long dat_bk1=0L, dat_bk2=0L;
 	double e1=0.0, e2=0.0;
 	int ret=-1;
-	int i, j, k;
+	int i, j;
 	FILE *fp;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
-printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n*CNT_SZ);
+//printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
 	if (fp) {
-		for (i=0; i<cnt_tbl.n; i++) {
+		// header
+		if (cnt_tbl.mode==1) {
+			fprintf(fp, "no.,count,flag,n,light,time\r\n");
+		}
+		for (i=0, j=0; i<cnt_tbl.n; j++) {
 			unsigned long total=0L;
-			int l=((cnt_tbl.buf[i][0]&0xe0)==cnt_head[4])?4:0;
 			int m=0;
-			for (j=0; j<(CNT_SZ-3); ) {
-				if ((cnt_tbl.buf[i][j+0]&0xe0)==cnt_head[l+0] &&
-					(cnt_tbl.buf[i][j+1]&0xe0)==cnt_head[l+1] &&
-					(cnt_tbl.buf[i][j+2]&0xe0)==cnt_head[l+2] &&
-					(cnt_tbl.buf[i][j+3]&0xe0)==cnt_head[l+3]) {
-					//各4バイトの下位5ビットが測光データ20bits
-					unsigned long dat=0L;
-					for (k=0; k<=3; k++) {
-						dat += (cnt_tbl.buf[i][j+k]&0x1f) << (5*k);
-					}
-					// 10ms生データ出力
-					if (cnt_tbl.mode==0) {
-						fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
-					}
-					// 10msecフィルタデータ出力
-					else if (cnt_tbl.mode==2) {
-						double e = f22*(double)e1 + f12*(double)e2 + f21*(double)dat_bk1 + f11*(double)dat_bk2;
-						fprintf(fp, "%4d,%10.3lf\r\n", i+1, e);
-						dat_bk2=dat_bk1;
-						dat_bk1=dat;
-						e2 = e1;
-						e1 = e;
-					}
-					// min以上max以下の値の平均値を1秒間の測定値とする
-					if (dat>=cnt_tbl.min && dat<=cnt_tbl.max) {
-						total += dat;
-						m++;
-					}
-					j+=4;
-					l = (l+4)%8;
+			int over_led=0;
+//printf("%s %d %4d\n", __FILE__, __LINE__, i);
+			while (i<cnt_tbl.n && (fpga_time(cnt_tbl.tm_fpga[i])/100)==j) {
+				//過大光確認(count_dev_rcv関数でビット入れ替え操作)
+				over_led = (cnt_tbl.buf[i]&0x80000000)?1:0;
+				// 10ms生データ出力
+				if (cnt_tbl.mode==0) {
+//					fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
+					fprintf(fp, "0,%4d,%10ld,%d\r\n", i+1, cnt_tbl.buf[i], cnt_tbl.tm_fpga[i]);
 				}
-				// 取りこぼしが起きているのでヘッダーで確認しながらスキップ
-				else{
-printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0);
-					for (j=j+1; j<CNT_SZ; j++) {
-						if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[0]) {
-							l=0;
-							break;
-						}
-						if ((cnt_tbl.buf[i][j]&0xe0)==cnt_head[4]) {
-							l=4;
-							break;
-						}
-					}
-printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0);
+				// 10msecフィルタデータ出力
+				else if (cnt_tbl.mode==2) {
+					double e = f22*(double)e1 + f12*(double)e2 + f21*(double)dat_bk1 + f11*(double)dat_bk2;
+					fprintf(fp, "%4d,%10.3lf\r\n", i+1, e);
+					dat_bk2=dat_bk1;
+					dat_bk1=cnt_tbl.buf[i];
+					e2 = e1;
+					e1 = e;
 				}
+				// min以上max以下の値の平均値を1秒間の測定値とする
+				if (cnt_tbl.buf[i]>=cnt_tbl.min && cnt_tbl.buf[i]<=cnt_tbl.max) {
+					total += cnt_tbl.buf[i];
+					m++;
+				}
+				i++;
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-//				fprintf(fp, "%s,%10ld,%d\r\n", cnt_tbl.str_start, (m>0)?total/m:0L, m);
-				fprintf(fp, "%4d,%10ld\r\n", i+1, (m>0)?GATE_COUNT(total/m):0L);
+				fprintf(fp, "%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
+			}
+			// 10ms生データ出力
+			else if (cnt_tbl.mode==0) {
+				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 		}
 		fclose(fp);
@@ -608,7 +775,7 @@ printf("%s %d %d %d %02X\n", __FILE__, __LINE__, i, j, cnt_tbl.buf[i][j+0]&0xe0)
 }
 
 // シーケンス
-static int sequence(int sock, int fd, int no)
+static int sequence(int sock, int no)
 {
 	int i, error=0;
 	char str[32];
@@ -801,22 +968,13 @@ static int sequence(int sock, int fd, int no)
 	case 0x51:		// 指定時間まち(×10msec)
 		if (pseq->busy==0) {
 			pseq->busy=1;
-			clock_gettime(CLOCK_MONOTONIC, &pseq->wai_start);
+			pseq->wai_start=tim_get_now();
 		}
 		else{
-			time_t msec;
-			long sec;
-			struct timespec tim_end;
-			clock_gettime(CLOCK_MONOTONIC, &tim_end);
-			if((tim_end.tv_nsec - pseq->wai_start.tv_nsec) < 0){
-				tim_end.tv_nsec += 1000000000;
-				tim_end.tv_sec  -= 1;
-			}
-			msec = (tim_end.tv_nsec - pseq->wai_start.tv_nsec)/1000000;
-			sec  = tim_end.tv_sec - pseq->wai_start.tv_sec;
-
-			if (((sec*1000)+msec) >= pact->move_pulse) {
-				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, sec, msec/100);
+			struct timespec tim_now=tim_get_now();
+			if (tim_timeup(tim_now, pseq->wai_start, pact->move_pulse)) {
+				struct timespec tim=tim_diff(tim_now, pseq->wai_start);
+				sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
 				pseq->busy=0;
 				pseq->current++;
 			}
@@ -908,7 +1066,7 @@ static int sequence(int sock, int fd, int no)
 	case 0x71:		// カウント取り込み
 	case 0x72:		// カウント取り込み(10msec)
 	case 0x73:		// カウント取込(フィルタ)
-		if (fd>-1) {
+		{
 			time_t t = time(NULL);
 			cnt_tbl.busy     =1;
 			switch (pact->act) {
@@ -929,16 +1087,10 @@ static int sequence(int sock, int fd, int no)
 			cnt_tbl.min      =pact->start_pulse + (pact->max_pulse<<16);
 			cnt_tbl.max      =pact->st_slope + (pact->ed_slope<<16);
 
-			ioctl(fd, TIOCMBIC, &rts);
-			tcflush(fd, TCIFLUSH);
-			ioctl(fd, TIOCMBIS, &rts);
-
 			cnt_tbl.t = t;
-			clock_gettime(CLOCK_MONOTONIC, &cnt_tbl.tim_start);
-			strftime(cnt_tbl.str_start, sizeof(cnt_tbl.str_start), "%Y/%m/%d  %H:%M:%S", localtime(&t));
-		}
-		else{
-			message(sock, no, 1, 1, "ERR カウントDevice OPEN");
+			cnt_tbl.tim_start=count_dev_reset();	// リセット&取込み開始時刻の取得
+			cnt_tbl.tim_start_fpga = -1;
+			memset(cnt_tbl.mkflag, 0, sizeof(cnt_tbl.mkflag));
 		}
 		pseq->current++;
 		break;
@@ -946,6 +1098,10 @@ static int sequence(int sock, int fd, int no)
 		if (cnt_tbl.busy==0) {
 			pseq->current++;
 		}
+		break;
+	case 0x75:		// マーキングフラグ
+		cnt_tbl.mkflag[cnt_tbl.sec]=pact->move_pulse;
+		pseq->current++;
 		break;
 	case 0x81:		// 音声1
 		if (fork()==0) {
@@ -976,11 +1132,13 @@ static int sequence(int sock, int fd, int no)
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
 		}
+        // 励起光をONにする
 		{
+        	// まずレジスタ2を読込む
 			unsigned char data[4]={0x2,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-	        // レジスタ2をONにする
+        	// レジスタ2へONを書込む
 			data[0]=0x22;
 			data[3]=data[3]|0x01;
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
@@ -989,11 +1147,13 @@ static int sequence(int sock, int fd, int no)
 		pseq->current++;
 		break;
 	case 0x92:		// LED OFF
+        // 励起光をOFFにする
 		{
+        	// まずレジスタ2を読込む
 			unsigned char data[4]={0x2,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-	        // レジスタ2をOFFにする
+        	// レジスタ2へOFFを書込む
 			data[0]=0x22;
 			data[3]=data[3]&~0x01;
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
@@ -1013,7 +1173,7 @@ static int sequence(int sock, int fd, int no)
 	case 0x94:		// ポンプ吐出
 		// まずSTOP
 		{
-			unsigned char data[4]={0x2f,0x41,0x80,0xc0};
+			unsigned char data[4]={0x2f,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
@@ -1021,7 +1181,16 @@ static int sequence(int sock, int fd, int no)
 		usleep(1000);
 		// 次に吐出	
 		{
-			unsigned char data[4]={0x2f,0x43,0x80|((pact->move_pulse>>6)&0x3f), 0xc0|(pact->move_pulse&0x3f)};
+			unsigned char data[4]={0x2f,0x42,0x87, 0xc0|(pact->move_pulse&0x3f)};
+			pthread_mutex_lock(&shm->mutex);
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			pthread_mutex_unlock(&shm->mutex);
+		}
+		pseq->current++;
+		break;
+	case 0x95:		// ポンプ連続
+		{
+			unsigned char data[4]={0x2f,0x41,0x87, 0xc0};
 			pthread_mutex_lock(&shm->mutex);
 			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
 			pthread_mutex_unlock(&shm->mutex);
@@ -1035,41 +1204,25 @@ static int sequence(int sock, int fd, int no)
 
 	// カウント取込み処理
 	if (cnt_tbl.busy==1) {
-		time_t nsec;
-		long sec;
-		struct timespec tim_now;
-		int n;
-		// 経過時間を得る
-		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if((tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec) < 0){
-			tim_now.tv_nsec += 1000000000;
-			tim_now.tv_sec  -= 1;
-		}
-		nsec = tim_now.tv_nsec - cnt_tbl.tim_start.tv_nsec;
-		sec  = tim_now.tv_sec - cnt_tbl.tim_start.tv_sec;
-
-		ioctl(fd, FIONREAD, &n);
-		if (n>=CNT_SZ) {
-			if (cnt_tbl.n<2000) {
-				read(fd, cnt_tbl.buf[cnt_tbl.n], CNT_SZ);
-				cnt_tbl.n++;
-			}
+		// カウント取込み
+		int n=count_dev_n();
+		if ((cnt_tbl.n+n)<(2000*CNT_SZ)) {
+			count_dev_read(&cnt_tbl.buf[cnt_tbl.n], &cnt_tbl.tm[cnt_tbl.n], &cnt_tbl.tm_fpga[cnt_tbl.n], n);
+			cnt_tbl.n+=n;
 		}
 
-		// 取り込み終了判定(取り込み開始ディレイがあるので+1まで取り込む)
-		if ((cnt_tbl.times+1) <= sec) {
-			// カウンターSTOP
-			//ioctl(fd, TIOCMBIC, &rts);
+		// 取り込み終了判定
+		if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.times+1)*1000)) {
 			cnt_tbl.busy=0;
 		}
 		// 1秒ごとの表示
-		else if (cnt_tbl.sec < sec) {
-			shm->count=(cnt_tbl.n>0)?get_1st_data(cnt_tbl.buf[cnt_tbl.n-1]):0L;
-			cnt_tbl.sec = sec;
-			sprintf(str, "取込:%lu秒 :%ld", sec, shm->count);
+		else if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.sec+1)*1000)) {
+			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100):0L;
+			cnt_tbl.sec += 1;
+			sprintf(str, "取込:%lu秒 :%ld", cnt_tbl.sec, shm->count);
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, sec, shm->count);
+			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, cnt_tbl.sec, shm->count);
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -1084,20 +1237,9 @@ static int sequence(int sock, int fd, int no)
 	// 終了判定
 	if (pseq->current >= pseq->max_line || error) {
 		/* 経過時間を表示する */
-		time_t msec;
-		long sec;
-		struct timespec tim_end;
-		clock_gettime(CLOCK_MONOTONIC, &tim_end);
-		if((tim_end.tv_nsec - tim_start.tv_nsec) < 0){
-			tim_end.tv_nsec += 1000000000;
-			tim_end.tv_sec  -= 1;
-		}
-		msec = (tim_end.tv_nsec - tim_start.tv_nsec)/1000000;
-		sec  = tim_end.tv_sec - tim_start.tv_sec;
-
-		sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, sec, msec/100);
+		struct timespec tim=tim_diff(tim_get_now(), tim_start);
+		sprintf(str, "Loop:%d Time:%lu.%lu秒", pseq->count+1, tim.tv_sec, tim.tv_nsec/1000000);
 		message(sock, no, 1, 2, str);
-
 
 		pseq->count++;
 		// 終了
@@ -1114,8 +1256,6 @@ static int sequence(int sock, int fd, int no)
 			// カウント値取得済であればファイルに保存する
 			if (cnt_tbl.owner==no && cnt_tbl.n>0) {
 				char tmp[32];
-				// カウンターSTOP
-				//ioctl(fd, TIOCMBIC, &rts);
 				cnt_tbl.busy=0;
 				if (count_save(tmp)==0) {
 					sprintf(str, "FILE %s", tmp);
@@ -1133,7 +1273,7 @@ static int sequence(int sock, int fd, int no)
 }
 
 // コマンド受信処理
-static int dispatch(int sock, int fd, char *buf)
+static int dispatch(int sock, char *buf)
 {
 static int local_param_err=0;		// 1:DC、PPMパラメータ送信エラー発生
 static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
@@ -1226,7 +1366,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 			pseq->run_times    = ((int)((unsigned char)buf[7])<<24) + ((int)((unsigned char)buf[8])<<16) + ((int)((unsigned char)buf[9])<<8) + (int)((unsigned char)buf[10]);
 			pseq->run          = 1;
 			message(sock, no, 1, 1, "RUN");
-			clock_gettime(CLOCK_MONOTONIC, &tim_start);
+			tim_start=tim_get_now();
 
 			/* Step実行の場合は前回のレジスタ値に戻す */
 			if (pseq->ret_line) {
@@ -1266,8 +1406,6 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 				break;
 			}
 		}
-		// カウント強制停止
-		//ioctl(fd, TIOCMBIC, &rts);
 		cnt_tbl.busy=0;
 		// カウント値取得済であればファイルに保存する
 		if (cnt_tbl.n>0) {
@@ -1302,20 +1440,13 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 }
 
 // コンソールとのソケット送受信
-static int execute(int sock, int fd)
+static int execute(int sock)
 {
-	char buf[512], str[32];
+	char buf[1024], str[32];
 	int i, n, len=1;
-	struct timespec tim_last, tim_last2, tim_now;
+	struct timespec tim_last=tim_get_now();
 
-	clock_gettime(CLOCK_MONOTONIC, &tim_last);
-	tim_last2=tim_last;
-
-	if (fd<0) {
-		message(sock, 0, 1, 1, "ERR カウントDevice OPEN");
-	}
-	// カウンターSTART
-	ioctl(fd, TIOCMBIS, &rts);
+	count_dev_reset();
 
 	while (len!=0) {
 
@@ -1335,19 +1466,20 @@ static int execute(int sock, int fd)
 			// ACK返信
 			nt_send(sock, ack_msg_data, sizeof(ack_msg_data));
 			// コマンド割り振り
-			dispatch(sock, fd, buf);
+			dispatch(sock, buf);
 		}
 
 		// シーケンス
 		for (i=0; i<CONSOLE_MAX; i++) {
 			if (seq_tbl[i].run) {
-				sequence(sock, fd, i+1);
+				sequence(sock, i+1);
 			}
+			// フォトンカウント取り込み
+			count_dev_rcv();
 		}
 
 		// 温度を取り込んで表示
-		clock_gettime(CLOCK_MONOTONIC, &tim_now);
-		if (tim_last.tv_sec<tim_now.tv_sec) {
+		if (tim_timeup(tim_get_now(), tim_last, 1000)) {
         static int flag=0, led_conf=0;
 			pthread_mutex_lock(&shm->mutex);
             flag^=1;
@@ -1355,13 +1487,10 @@ static int execute(int sock, int fd)
             if (flag) {
     			unsigned char data[4]={0x06,0x40,0x80,0xc0};
 	    		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-		    	// OK
-			    if (data[0]==1) {
-				//  temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
-				    temp = (((data[2]&0x3f)<<6) + (data[3]&0x3f));
-    			}
+				//temp = HEX2TEMP(((data[2]&0x3f)<<6) + (data[3]&0x3f));
+				temp = (((data[2]&0x3f)<<6) + (data[3]&0x3f));
 	    		// ERR
-		    	else if (data[0]==0x20) {
+		    	if (data[0]&0x20) {
 			    	unsigned char err_reset[4]={0x3f,0x40,0x80,0xc1};
 				    wiringPiSPIDataRW(MAX_SPI_CHANNEL, err_reset, 4);
                 }
@@ -1375,27 +1504,19 @@ static int execute(int sock, int fd)
 			pthread_mutex_unlock(&shm->mutex);
 
 			// カウント取り込みが非動作であればここでデータを取り込む
-			if (fd>-1 && cnt_tbl.busy==0) {
-				ioctl(fd, FIONREAD, &n);
-				if (n>=CNT_SZ) {
-					read(fd, buf, CNT_SZ);
-					tcflush(fd, TCIFLUSH);
-					shm->count=get_1st_data(buf);
-				}
-			}
+			if (cnt_tbl.busy==0) {
+				int n=count_dev_n();
+				count_dev_read((long*)buf, NULL, NULL, n);
+				shm->count=get_1st_data((long*)buf, n);
 
-			// 1秒ごとに表示
-			if ((tim_last2.tv_sec+0)<tim_now.tv_sec && cnt_tbl.busy==0) {
-		//		sprintf(str, "%03X %.2f℃", led_conf, temp);
+			//	sprintf(str, "%03X %.2f℃", led_conf, temp);
 				sprintf(str, "%d℃   %ld", temp, shm->count);
 				message(sock, 0, 1, 1, str);
-				tim_last2=tim_now;
 			}
-			tim_last=tim_now;
+
+			tim_last=tim_get_now();
 		}
 	}
-	// カウンターSTOP
-	ioctl(fd, TIOCMBIC, &rts);
 	return 0;
 }
 
@@ -1515,7 +1636,6 @@ static int mutex_init(void)
 
 int main(void)
 {
-	int fd = open_ttyS( "/dev/ttyUSB0", 9600, 8, 2, 1);		// フォトンカウント
 	int servSock;							//server socket descripter
 	int clitSock;							//client socket descripter
 	struct sockaddr_in servSockAddr;		//server internet socket address
@@ -1523,9 +1643,6 @@ int main(void)
 	unsigned int clitLen;					//client internet socket address length
 	unsigned short servPort = 9001;			//server port number
 	int on = 1, ret, i;
-
-	// カウンターSTOP
-	ioctl(fd, TIOCMBIC, &rts);
 
 	mutex_init();
 
@@ -1595,7 +1712,7 @@ int main(void)
 #else
 		ret = 0;
 #endif
-		execute(clitSock, fd);
+		execute(clitSock);
 
 		close(clitSock);
 		printf("close\n");
