@@ -697,7 +697,7 @@ static long get_1st_data(long buf[], int n, int *psts)
 		if (buf[i]&0x80000000) {
 			*psts=1;
 		}
-		total += buf[i];
+		total += (buf[i]&0x7fffffff);
 		m++;
 	}
 	return GATE_COUNT(total/m);
@@ -739,6 +739,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			while (i<cnt_tbl.n && (fpga_time(cnt_tbl.tm_fpga[i])/100)==j) {
 				//過大光確認(count_dev_rcv関数でビット入れ替え操作)
 				over_led = (cnt_tbl.buf[i]&0x80000000)?1:0;
+				cnt_tbl.buf[i] &= 0x7fffffff;
 				// 10ms生データ出力
 				if (cnt_tbl.mode==0) {
 //					fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
@@ -1221,10 +1222,10 @@ static int sequence(int sock, int no)
 			int sts=0;
 			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100, &sts):0L;
 			cnt_tbl.sec += 1;
-			sprintf(str, "取込:%lu秒 :%ld %s", cnt_tbl.sec, shm->count, (sts)?"過大光":"");
+			sprintf(str, "取込:%lu秒 :%ld %s", cnt_tbl.sec, shm->count, (sts)?"Ov":"");
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%d℃   取込:%lu秒 :%ld %s", temp, cnt_tbl.sec, shm->count, (sts)?"過大光":"");
+			sprintf(str, "%d℃   取込:%lu秒 :%ld %s", temp, cnt_tbl.sec, shm->count, (sts)?"Ov":"");
 			message(sock, 0, 1, 1, str);
 		}
 	}
