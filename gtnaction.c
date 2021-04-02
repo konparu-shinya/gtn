@@ -166,7 +166,8 @@ struct _action_tbl {
 
 // パルスモーター管理テーブル
 struct _ppm_ctrl {
-	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby
+	int driving;			// 0:not use 1:init home out 2:init home in 3:init home add 4:init busy 5:standby 0x10:低速駆動中
+	long move_pulse;		// 低速ドライブ時の移動パルス数
 	int	ratio;
 	struct _init_pulse {
 		int	init;
@@ -402,6 +403,16 @@ static long L6470_param_read(unsigned char ch, unsigned char no)
 static int L6470_busy(unsigned char ch)
 {
 	return ((L6470_param_read(ch, 0x19)&0x02) == 0x00)?1:0;
+}
+
+// L6470 ABS位置をunsigned型で得る
+static unsigned long L6470_abs_pos(unsigned char ch)
+{
+	unsigned long abs_pos=L6470_param_read(ch, 0x01);
+	if (abs_pos&0x200000) {
+		return (~(abs_pos|0xffc00000))+1;
+	}
+	return abs_pos;
 }
 
 // L6470 初期設定
@@ -674,18 +685,19 @@ static int count_dev_read(long *ptr, struct timespec *tm, long *tm_fpga, int len
 }
 
 // buf内のカウント値の平均を求める
-static long get_1st_data(long buf[], int n)
+static long get_1st_data(long buf[], int n, int *psts)
 {
 	unsigned long total=0L;
 	int i, m;
+	*psts=0;
 //printf("%s %d %d\n", __FILE__, __LINE__, n);
 	for (i=0, m=0; i<n; i++) {
 //printf("%s %d %4d %4d %10x\n", __FILE__, __LINE__, i, n, buf[i]);
 		//過大光確認
 		if (buf[i]&0x80000000) {
-			return 0x3ffff;
+			*psts=1;
 		}
-		total += buf[i];
+		total += (buf[i]&0x7fffffff);
 		m++;
 	}
 	return GATE_COUNT(total/m);
@@ -727,6 +739,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			while (i<cnt_tbl.n && (fpga_time(cnt_tbl.tm_fpga[i])/100)==j) {
 				//過大光確認(count_dev_rcv関数でビット入れ替え操作)
 				over_led = (cnt_tbl.buf[i]&0x80000000)?1:0;
+				cnt_tbl.buf[i] &= 0x7fffffff;
 				// 10ms生データ出力
 				if (cnt_tbl.mode==0) {
 //					fprintf(fp, "%4d,%10ld\r\n", i+1, dat);
@@ -819,34 +832,51 @@ static int sequence(int sock, int no)
 		break;
 	case 0x12:		// パルスモーターSTEP(相対パルス指定)
 		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x40:0x41;
-			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
-//			delay(10);
+			if (pact->max_pulse>=15) {
+				unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.step)?0x40:0x41;
+				L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
+				L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
+			}
+			// 低速ドライブ
+			else{
+				struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+				unsigned char cmd = (pctrl->dir.step)?0x50:0x51;
+				unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+				pctrl->move_pulse = abs_pos+(long)pact->move_pulse;
+				pctrl->driving    = 0x10;
+				L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+				L6470_cmd_write(pact->mno-1, cmd, 3, (long)((double)pact->max_pulse*(250*pow(10,-9))/(pow(2,-28))));//Run
+			}
 			pseq->current++;
 		}
 		break;
 	case 0x13:		// パルスモーターHOME(相対パルス指定)
 		if (!L6470_busy(pact->mno-1)) {
-			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
-			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
-			L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
-//			delay(10);
+			if (pact->max_pulse>=15) {
+				unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
+				L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
+				L6470_cmd_write(pact->mno-1, cmd, 3, pact->move_pulse);//Move
+			}
+			// 低速ドライブ
+			else{
+				struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+				unsigned char cmd = (pctrl->dir.home)?0x50:0x51;
+				unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+				pctrl->move_pulse = abs_pos-(long)pact->move_pulse;
+				pctrl->driving    = 0x11;
+				L6470_change_spd(pact->mno-1, 0, 0x3ff, 0, 0);
+				L6470_cmd_write(pact->mno-1, cmd, 3, (long)((double)pact->max_pulse*(250*pow(10,-9))/(pow(2,-28))));//Run
+			}
 			pseq->current++;
 		}
 		break;
 	case 0x14:		// パルスモーターHOME(現在位置パルス分をCCW回転する)
 		if (!L6470_busy(pact->mno-1)) {
 			unsigned char cmd = (ppm_ctrl[pact->mno-1].dir.home)?0x40:0x41;
-			long abs_pos=L6470_param_read(pact->mno-1, 0x01);
+			unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
 			L6470_change_spd(pact->mno-1, pact->start_pulse, pact->max_pulse, pact->st_slope, pact->ed_slope);
 			//L6470_write(pact->mno-1, 0x70);//GoHome
-			if (abs_pos&0x3fffff) {
-				L6470_cmd_write(pact->mno-1, cmd, 3, (~(abs_pos|0xffc00000))+1);//Move
-			}
-			else{
-				L6470_cmd_write(pact->mno-1, cmd, 3, abs_pos);//Move
-			}
+			L6470_cmd_write(pact->mno-1, cmd, 3, abs_pos);//Move
 //			delay(10);
 			pseq->current++;
 		}
@@ -860,7 +890,23 @@ static int sequence(int sock, int no)
 		}
 		break;
 	case 0x16:		// パルスモーター停止までまつ
-		if (!L6470_busy(pact->mno-1)) {
+		if (ppm_ctrl[pact->mno-1].driving==0x10 || ppm_ctrl[pact->mno-1].driving==0x11) {
+			struct _ppm_ctrl *pctrl = &ppm_ctrl[pact->mno-1];
+			unsigned long abs_pos=L6470_abs_pos(pact->mno-1);
+			// STEP
+			if (ppm_ctrl[pact->mno-1].driving==0x10 && pctrl->move_pulse<=abs_pos) {
+				pctrl->driving=0;
+				L6470_write(pact->mno-1, 0xB8);	// HardStop
+				pseq->current++;
+			}
+			// HOME
+			else if (ppm_ctrl[pact->mno-1].driving==0x11 && pctrl->move_pulse>=abs_pos) {
+				pctrl->driving=0;
+				L6470_write(pact->mno-1, 0xB8);	// HardStop
+				pseq->current++;
+			}
+		}
+		else if (!L6470_busy(pact->mno-1)) {
 			pseq->current++;
 		}
 		break;
@@ -1173,12 +1219,13 @@ static int sequence(int sock, int no)
 		}
 		// 1秒ごとの表示
 		else if (tim_timeup(tim_get_now(), cnt_tbl.tim_start, (cnt_tbl.sec+1)*1000)) {
-			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100):0L;
+			int sts=0;
+			shm->count=(cnt_tbl.n>100)?get_1st_data(&cnt_tbl.buf[cnt_tbl.n-100], 100, &sts):0L;
 			cnt_tbl.sec += 1;
-			sprintf(str, "取込:%lu秒 :%ld", cnt_tbl.sec, shm->count);
+			sprintf(str, "取込:%lu秒 :%ld %s", cnt_tbl.sec, shm->count, (sts)?"Ov":"");
 			message(sock, no, 1, 3, str);
 			// ベース画面への表示	
-			sprintf(str, "%d℃   取込:%lu秒 :%ld", temp, cnt_tbl.sec, shm->count);
+			sprintf(str, "%d℃   取込:%lu秒 :%ld %s", temp, cnt_tbl.sec, shm->count, (sts)?"Ov":"");
 			message(sock, 0, 1, 1, str);
 		}
 	}
@@ -1248,6 +1295,7 @@ static int local_reg_flag[CONSOLE_MAX]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 	if (id==0xC101 && run_flag==0) {
 		unsigned char no = (unsigned char)buf[7];
 		struct _ppm_ctrl *pctrl = &ppm_ctrl[no-1];
+		pctrl->move_pulse          = 0;
 		pctrl->ratio               = ((int)((unsigned char)buf[10])<<8) + (int)((unsigned char)buf[11]);
 		pctrl->init_pulse.init     = ((int)((unsigned char)buf[ 8])<<8) + (int)((unsigned char)buf[ 9]);
 		pctrl->init_pulse.home_out = ((int)((unsigned char)buf[12])<<8) + (int)((unsigned char)buf[13]);
@@ -1460,12 +1508,13 @@ static int execute(int sock)
 
 			// カウント取り込みが非動作であればここでデータを取り込む
 			if (cnt_tbl.busy==0) {
+				int sts=0;
 				int n=count_dev_n();
 				count_dev_read((long*)buf, NULL, NULL, n);
-				shm->count=get_1st_data((long*)buf, n);
+				shm->count=get_1st_data((long*)buf, n, &sts);
 
 			//	sprintf(str, "%03X %.2f℃", led_conf, temp);
-				sprintf(str, "%d℃   %ld", temp, shm->count);
+				sprintf(str, "%d℃   %ld %s", temp, shm->count, (sts)?"過大光":"");
 				message(sock, 0, 1, 1, str);
 			}
 

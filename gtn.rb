@@ -8,7 +8,7 @@ require 'gmail'
 
 Gtk.init
 
-VER = '12.0-gtk2'
+VER = '13.0-gtk2'
 
 #MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp, kuboi@alice.aandt.co.jp, munakatay@alice.aandt.co.jp"
 #MailTo = "konparus@alice.aandt.co.jp, yoshihara@alice.aandt.co.jp
@@ -33,7 +33,11 @@ Prjs = [ "#{BasePrm}",
         "#{BasePrm}/prj01", "#{BasePrm}/prj02", "#{BasePrm}/prj03", "#{BasePrm}/prj04", "#{BasePrm}/prj05",
         "#{BasePrm}/prj06", "#{BasePrm}/prj07", "#{BasePrm}/prj08", "#{BasePrm}/prj09", "#{BasePrm}/prj10",
         "#{BasePrm}/prj11", "#{BasePrm}/prj12", "#{BasePrm}/prj13", "#{BasePrm}/prj14", "#{BasePrm}/prj15",
-        "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20" ]
+        "#{BasePrm}/prj16", "#{BasePrm}/prj17", "#{BasePrm}/prj18", "#{BasePrm}/prj19", "#{BasePrm}/prj20",
+        "#{BasePrm}/prj21", "#{BasePrm}/prj22", "#{BasePrm}/prj23", "#{BasePrm}/prj24", "#{BasePrm}/prj25",
+        "#{BasePrm}/prj26", "#{BasePrm}/prj27", "#{BasePrm}/prj28", "#{BasePrm}/prj29", "#{BasePrm}/prj30",
+        "#{BasePrm}/prj31", "#{BasePrm}/prj32", "#{BasePrm}/prj33", "#{BasePrm}/prj34", "#{BasePrm}/prj35",
+        "#{BasePrm}/prj36", "#{BasePrm}/prj37", "#{BasePrm}/prj38", "#{BasePrm}/prj39", "#{BasePrm}/prj40" ]
 File_ana = "#{ENV['HOME']}/Desktop/免疫ドライシステム#{Kakuchou_si}"
 
 ACK = 0x06
@@ -413,7 +417,7 @@ class SelProject
     @dialog.set_title( 'プロジェクト選択' )
     @dialog.signal_connect( 'delete_event' ){ exit_seq(false) }
     @dialog.window_position = Gtk::Window::POS_CENTER
-    @dialog.set_default_size 400, 80
+    @dialog.set_default_size 400, 600
     @dialog.modify_bg(Gtk::STATE_NORMAL, Gdk::Color.parse("#fffcc4"))
 
     # TreeView生成
@@ -450,8 +454,13 @@ class SelProject
       end while iter.next!
     end
 
-    @treeview.show_all
-    @dialog.vbox.add( @treeview )
+    sw = Gtk::ScrolledWindow.new()
+    sw.set_shadow_type(Gtk::SHADOW_ETCHED_IN)
+    sw.set_policy(Gtk::POLICY_NEVER,Gtk::POLICY_AUTOMATIC)
+    sw.add( @treeview )
+
+    sw.show_all
+    @dialog.vbox.add( sw )
 
     # ダイアログを表示して戻りを処理する
     @dialog.run do |response|
@@ -522,15 +531,17 @@ class MkProject
     table = Gtk::Table.new( 4, 2, false )
     ( 1..Prjs.size-1 ).each do |i|
       edtLine.push Gtk::Entry.new()
-      table.attach( Gtk::Label.new( "#{i}" ),   0, 1,  i, i+1 )
-      table.attach( edtLine[-1],                1, 4,  i, i+1 )
+	  y = (i-1)%20+1
+	  x = (i-1)/20*5
+      table.attach( Gtk::Label.new( "#{i}" ),   x,   x+1,  y, y+1 )
+      table.attach( edtLine[-1],                x+1, x+4,  y, y+1 )
     end
 
     # 登録済みのプロジェクト名を表示
     if File.exist?( PrjNames )
       file = IO.readlines( PrjNames )
       edtLine.each_with_index do |x, i|
-        x.set_text( file[i].chop )
+        x.set_text( file[i].chop ) if file[i]
       end
     end
 
@@ -695,7 +706,7 @@ class ActDelete
     cfg_file = IO.readlines( $main_form.file_config ) if File.exist? $main_form.file_config
 
     # actionファイルの有無を調べる
-    (1..20).each do |i|
+    ( 1..Prjs.size-1 ).each do |i|
       fname = "#{Prjs[myno]}/action#{i}#{Kakuchou_si}"
       if File.exist? fname
         cfg_file.each do |line|

@@ -91,6 +91,7 @@ class Window
     @entCntTime.set_text("10")
     @entCntTime.set_xalign(1)
     lblUnit3   = Gtk::Label.new("x0.1msec(0-99)");
+    @lblLedErr = Gtk::Label.new("");
 
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
@@ -256,10 +257,11 @@ class Window
     tbl.attach_defaults(lblUnit1,   5, 7, 9,10)
     tbl.attach_defaults(lblDelay,   0, 2,10,11)
     tbl.attach_defaults(@entDelay,  2, 5,10,11)
-    tbl.attach_defaults(lblUnit2,   5, 7,10,12)
+    tbl.attach_defaults(lblUnit2,   5, 7,10,11)
     tbl.attach_defaults(lblCntTime, 0, 2,11,12)
     tbl.attach_defaults(@entCntTime,2, 5,11,12)
     tbl.attach_defaults(lblUnit3,   5, 7,11,12)
+    tbl.attach_defaults(@lblLedErr, 2, 7,12,13)
 
     tbl.attach_defaults(lblTMP,     0, 2,13,14)
     tbl.attach_defaults(@entTMP,    2, 5,13,14)
@@ -307,6 +309,18 @@ p [__LINE__, @spi.dataRW([0x2,0x40,0x80,0xc0])]
   def set_led_config
     # LED点灯開始設定
     value = @entLED_ON.text.to_i + @entDelay.text.to_i + @entCntTime.text.to_i
+    if value > 99
+      @lblLedErr.set_text("設定時間の合計が99を超えました")
+      style = Gtk::Style.new
+      style.set_fg(Gtk::STATE_NORMAL, 65535, 0, 0)
+      @lblLedErr.style = style
+      value = 99
+    else
+      @lblLedErr.set_text("")
+      style = Gtk::Style.new
+      style.set_fg(Gtk::STATE_NORMAL, 0, 0, 0)
+      @lblLedErr.style = style
+    end
     @spi.dataRW([0x31,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])
     # LED消灯開始設定
     value = @entDelay.text.to_i + @entCntTime.text.to_i
