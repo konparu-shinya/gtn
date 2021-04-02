@@ -35,6 +35,7 @@ struct _slv_tbl {
 	int	req;			// 1:PMモータ動作中 2:DCモータ動作中 11:I/O処理中 12:I/O読込み要求 13:I/O読込み中
 	int busy;			// 0:停止中 1:動作中 2:動作完了
 	int no;				// CONSOLE番号
+	struct timespec slv_start;	// 動作開始
 } static slv_tbl[30];// 最大30のスレーブ
 
 // 動作管理テーブル
@@ -507,6 +508,10 @@ static int sequence(int sock, int no, int can)
 			}
 			/* スレーブが動作中の場合は動作を待つ */	
 			else if (pslv->busy) {
+				// 5秒無応答でSKIP
+				if (pslv->req==11 && tim_timeup(tim_get_now(), pslv->slv_start, 5000)) {
+					pslv->busy=2;
+				}
 				break;
 			}
 			/* Action */
@@ -526,6 +531,7 @@ static int sequence(int sock, int no, int can)
 				pslv->req=11;
 				pslv->busy=1;
 				pslv->no=no;
+				pslv->slv_start=tim_get_now();
 			}
 		}
 		break;
