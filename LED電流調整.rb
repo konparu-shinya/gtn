@@ -111,8 +111,9 @@ class Window
 
     lblPumpCfg  = Gtk::Label.new("ポンプ設定");
     @entPumpCfg = Gtk::Entry.new
-    @entPumpCfg.set_text("50")
+    @entPumpCfg.set_text("7")
     @entPumpCfg.set_xalign(1)
+    lblUnit4    = Gtk::Label.new("(1-15)初期値7");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -140,8 +141,6 @@ class Window
             @entCntTime.set_text("#{ary[1]}") if ary[1]
           when 'pump'
             @entPumpCfg.set_text("#{ary[1]}") if ary[1]
-          when 'pump'
-            @entPumpCfg.set_text("#{ary[1]}") if ary[1]
           when 'ana_no'
             @entAna.set_text("#{ary[1]}") if ary[1]
           when 'over_led'
@@ -158,8 +157,9 @@ class Window
     @spi.gate_time(@entGT.text.to_i)
     # pump on/off
     value = @entPumpCfg.text.to_i
+	value = 15 if value > 15
    #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
-    @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
+    @spi.dataRW([0x2f,0x40,0x80|(value&0xf), 0xc0])
 
     @entTMP.signal_connect('changed') do 
       set_temp_value
@@ -226,7 +226,8 @@ class Window
       # pump on/off
       value = @entPumpCfg.text.to_i
      #@spi.dataRW([0x2f,0x40,0x80|((value>>6)&0x7), 0xc0|(value&0x3f)])
-      @spi.dataRW([0x2f,0x40,0x87, 0xc0|(value&0x3f)])
+	  value = 15 if value > 15
+      @spi.dataRW([0x2f,0x40,0x80|(value&0xf), 0xc0])
     end
 
     tbl = Gtk::Table.new(2,3,true)
@@ -274,6 +275,7 @@ class Window
 
     tbl.attach_defaults(lblPumpCfg, 0, 2,17,18)
     tbl.attach_defaults(@entPumpCfg,2, 5,17,18)
+    tbl.attach_defaults(lblUnit4,   5, 7,17,18)
 
     win.add(tbl)
     win.show_all()

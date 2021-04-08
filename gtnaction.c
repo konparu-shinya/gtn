@@ -1165,36 +1165,48 @@ static int sequence(int sock, int no)
 		break;
 	case 0x93:		// ポンプOFF
 		{
-			unsigned char data[4]={0x2f,0x40+0x00,0x80,0xc0};
+			unsigned char dataW[4]={0x2f,0x40,0x80,0xc0};
+			unsigned char dataR[4]={0x0f,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			// duty読出し
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataR, 4);
+			// duty値セット
+			dataW[2] = dataR[2];
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataW, 4);
 			pthread_mutex_unlock(&shm->mutex);
 		}
 		pseq->current++;
 		break;
 	case 0x94:		// ポンプ吐出
-		// まずSTOP
 		{
-			unsigned char data[4]={0x2f,0x40,0x80,0xc0};
+			unsigned char dataW1[4]={0x2f,0x40,0x80,0xc0};
+			unsigned char dataW2[4]={0x2f,0x42,0x80,0xc0|(pact->move_pulse&0x3f)};
+			unsigned char dataR[4]={0x0f,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-			pthread_mutex_unlock(&shm->mutex);
-		}
-		usleep(1000);
-		// 次に吐出	
-		{
-			unsigned char data[4]={0x2f,0x42,0x87, 0xc0|(pact->move_pulse&0x3f)};
-			pthread_mutex_lock(&shm->mutex);
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			// duty読出し
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataR, 4);
+			// duty値セット
+			dataW1[2] = dataR[2];
+			dataW2[2] = dataR[2];
+			// まずSTOP
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataW1, 4);
+			usleep(1000);
+			// 次に吐出	
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataW2, 4);
 			pthread_mutex_unlock(&shm->mutex);
 		}
 		pseq->current++;
 		break;
 	case 0x95:		// ポンプ連続
 		{
-			unsigned char data[4]={0x2f,0x41,0x87, 0xc0};
+			unsigned char dataW[4]={0x2f,0x41,0x80, 0xc0};
+			unsigned char dataR[4]={0x0f,0x40,0x80,0xc0};
 			pthread_mutex_lock(&shm->mutex);
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+			// duty読出し
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataR, 4);
+			// duty値セット
+			dataW[2] = dataR[2];
+			wiringPiSPIDataRW(MAX_SPI_CHANNEL, dataW, 4);
 			pthread_mutex_unlock(&shm->mutex);
 		}
 		pseq->current++;
