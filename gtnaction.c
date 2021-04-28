@@ -50,6 +50,8 @@ struct _shm {
 	pthread_mutex_t mutex;	// ミューテックス
 	long	count;			// フォトンカウント値
 	long	gate_time;		// ゲートタイムmsec
+	long	meas_st;		// 測定開始区間
+	long	meas_ed;		// 測定終了区間
 } static *shm;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
@@ -1639,6 +1641,8 @@ static int mutex_init(void)
 		pthread_mutex_init(&shm->mutex, &mat);
 		shm->count=0L;
 		shm->gate_time=10L;
+		shm->meas_st=10L;
+		shm->meas_ed=11L;
 	}
 	/* 既に起動済 */
 	else{

@@ -33,7 +33,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed, :lblPumpVal
 
   def initialize
     @spi = WiringPiSpi.new
@@ -92,6 +92,14 @@ class Window
     @entCntTime.set_xalign(1)
     lblUnit3   = Gtk::Label.new("x0.1msec(0-99)");
     @lblLedErr = Gtk::Label.new("");
+    lblMeasSt  = Gtk::Label.new("測光開始");
+    @entMeasSt = Gtk::Entry.new
+    @entMeasSt.set_text("10")
+    @entMeasSt.set_xalign(1)
+    lblMeasEd  = Gtk::Label.new("測光終了");
+    @entMeasEd = Gtk::Entry.new
+    @entMeasEd.set_text("10")
+    @entMeasEd.set_xalign(1)
 
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
@@ -114,6 +122,7 @@ class Window
     @entPumpCfg.set_text("7")
     @entPumpCfg.set_xalign(1)
     lblUnit4    = Gtk::Label.new("(1-15)初期値7");
+    @lblPumpVal = Gtk::Label.new("-");
 
     # 分析機ファイルから呼び出して表示する
     if File.exist?( File_ana )
@@ -145,6 +154,10 @@ class Window
             @entAna.set_text("#{ary[1]}") if ary[1]
           when 'over_led'
             @cbOverLed.active = ("#{ary[1]}"=="true")?true:false if ary[1]
+          when 'meas_st'
+            @entMeasSt.set_text("#{ary[1]}") if ary[1]
+          when 'meas_ed'
+            @entMeasEd.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
@@ -155,6 +168,8 @@ class Window
     set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
+    @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+
     # pump on/off
     value = @entPumpCfg.text.to_i
 	value = 15 if value > 15
@@ -222,6 +237,14 @@ class Window
       @spi.gate_time(i)
     end
 
+    @entMeasSt.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    end
+
+    @entMeasEd.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    end
+
     @entPumpCfg.signal_connect('changed') do 
       # pump on/off
       value = @entPumpCfg.text.to_i
@@ -262,20 +285,25 @@ class Window
     tbl.attach_defaults(lblCntTime, 0, 2,11,12)
     tbl.attach_defaults(@entCntTime,2, 5,11,12)
     tbl.attach_defaults(lblUnit3,   5, 7,11,12)
-    tbl.attach_defaults(@lblLedErr, 2, 7,12,13)
+    tbl.attach_defaults(lblMeasSt,  0, 2,12,13)
+    tbl.attach_defaults(@entMeasSt, 2, 5,12,13)
+    tbl.attach_defaults(lblMeasEd,  0, 2,13,14)
+    tbl.attach_defaults(@entMeasEd, 2, 5,13,14)
+    tbl.attach_defaults(@lblLedErr, 2, 7,14,15)
 
-    tbl.attach_defaults(lblTMP,     0, 2,13,14)
-    tbl.attach_defaults(@entTMP,    2, 5,13,14)
-    tbl.attach_defaults(lblDo,      5, 6,13,14)
-    tbl.attach_defaults(@lblTVal,   6, 7,13,14)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,14,15)
-    tbl.attach_defaults(@entTMPCfga,2, 5,14,15)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,15,16)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,15,16)
+    tbl.attach_defaults(lblTMP,     0, 2,15,16)
+    tbl.attach_defaults(@entTMP,    2, 5,15,16)
+    tbl.attach_defaults(lblDo,      5, 6,15,16)
+    tbl.attach_defaults(@lblTVal,   6, 7,15,16)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,16,17)
+    tbl.attach_defaults(@entTMPCfga,2, 5,16,17)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,17,18)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,17,18)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,17,18)
-    tbl.attach_defaults(@entPumpCfg,2, 5,17,18)
-    tbl.attach_defaults(lblUnit4,   5, 7,17,18)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,19,20)
+    tbl.attach_defaults(@entPumpCfg,2, 5,19,20)
+    tbl.attach_defaults(lblUnit4,   5, 7,19,20)
+    tbl.attach_defaults(@lblPumpVal,6, 7,20,21)
 
     win.add(tbl)
     win.show_all()
@@ -342,7 +370,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -383,6 +411,12 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'over_led'
         fw << "over_led=#{(@cbOverLed.active?)?"true":"false"}\n"
         set_flag[10] = true
+      when 'meas_st'
+        fw << "meas_st=#{@entMeasSt.text.to_i}\n"
+        set_flag[11] = true
+      when 'meas_ed'
+        fw << "meas_ed=#{@entMeasEd.text.to_i}\n"
+        set_flag[12] = true
       else
         fw << line
       end
@@ -399,6 +433,8 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
     fw << "ana_no=#{@entAna.text}\n" if set_flag[9] == nil
     fw << "over_led=#{(@cbOverLed.active?)?"true":"flase"}\n" if set_flag[10] == nil
+    fw << "meas_st=#{@entMeasSt.text.to_i}\n" if set_flag[11] == nil
+    fw << "meas_ed=#{@entMeasEd.text.to_i}\n" if set_flag[12] == nil
     fw.close
 
     Gtk.main_quit()
@@ -501,6 +537,12 @@ Gtk.timeout_add( 1000 ) do
   if ($count[4]%5) == 0
     ary = w.spi.dataRW([0x05,0x40,0x80,0xc0])
     w.lblLA.set_text("#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}") if ary[0]==1
+  end
+
+  # Pump
+  if ($count[4]%5) == 0
+    ary = w.spi.dataRW([0x0f,0x40,0x80,0xc0])
+    w.lblPumpVal.set_text("#{ary[2]&0xf}") if ary[0]==1
   end
   true
 end
