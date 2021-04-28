@@ -33,7 +33,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed, :lblPumpVal
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed, :lblPumpVal, :lblMeasDt
 
   def initialize
     @spi = WiringPiSpi.new
@@ -100,6 +100,7 @@ class Window
     @entMeasEd = Gtk::Entry.new
     @entMeasEd.set_text("10")
     @entMeasEd.set_xalign(1)
+    @lblMeasDt = Gtk::Label.new("");
 
     lblTMP    = Gtk::Label.new("設定温度");
     @entTMP   = Gtk::Entry.new
@@ -289,21 +290,22 @@ class Window
     tbl.attach_defaults(@entMeasSt, 2, 5,12,13)
     tbl.attach_defaults(lblMeasEd,  0, 2,13,14)
     tbl.attach_defaults(@entMeasEd, 2, 5,13,14)
-    tbl.attach_defaults(@lblLedErr, 2, 7,14,15)
+    tbl.attach_defaults(@lblMeasDt, 2, 4,14,15)
+    tbl.attach_defaults(@lblLedErr, 2, 7,15,16)
 
-    tbl.attach_defaults(lblTMP,     0, 2,15,16)
-    tbl.attach_defaults(@entTMP,    2, 5,15,16)
-    tbl.attach_defaults(lblDo,      5, 6,15,16)
-    tbl.attach_defaults(@lblTVal,   6, 7,15,16)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,16,17)
-    tbl.attach_defaults(@entTMPCfga,2, 5,16,17)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,17,18)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,17,18)
+    tbl.attach_defaults(lblTMP,     0, 2,16,17)
+    tbl.attach_defaults(@entTMP,    2, 5,16,17)
+    tbl.attach_defaults(lblDo,      5, 6,16,17)
+    tbl.attach_defaults(@lblTVal,   6, 7,16,17)
+    tbl.attach_defaults(lblTMPCfga, 0, 2,17,18)
+    tbl.attach_defaults(@entTMPCfga,2, 5,17,18)
+    tbl.attach_defaults(lblTMPCfgb, 0, 2,18,19)
+    tbl.attach_defaults(@entTMPCfgb,2, 5,18,19)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,19,20)
-    tbl.attach_defaults(@entPumpCfg,2, 5,19,20)
-    tbl.attach_defaults(lblUnit4,   5, 7,19,20)
-    tbl.attach_defaults(@lblPumpVal,6, 7,20,21)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,20,21)
+    tbl.attach_defaults(@entPumpCfg,2, 5,20,21)
+    tbl.attach_defaults(lblUnit4,   5, 7,20,21)
+    tbl.attach_defaults(@lblPumpVal,6, 7,21,22)
 
     win.add(tbl)
     win.show_all()
@@ -490,6 +492,13 @@ Gtk.timeout_add( 1000 ) do
   else
     w.lblCount.set_text("#{w.spi.foton_count}")
   end
+
+  # 測定値データ
+  style = Gtk::Style.new
+  style.set_fg(Gtk::STATE_NORMAL, 0, 0, 65535)
+  w.lblMeasDt.style = style
+  w.lblMeasDt.set_text("測定値:#{w.spi.meas_data}")
+
   # 経過時刻表示
 # tim = Time.at(Time.at(Time.now - w.time_st).getutc)
   tim = Time.at(Time.at(Process.clock_gettime(Process::CLOCK_MONOTONIC) - w.time_st).getutc)

@@ -52,6 +52,7 @@ struct _shm {
 	long	gate_time;		// ゲートタイムmsec
 	long	meas_st;		// 測定開始区間
 	long	meas_ed;		// 測定終了区間
+	long	meas_data;		// 測定値
 } static *shm;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
@@ -725,6 +726,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	int ret=-1;
 	int i, j;
 	FILE *fp;
+	shm->meas_data=0L;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
 //printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
@@ -771,7 +773,13 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			else if (cnt_tbl.mode==0) {
 				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
+			// 測定区間データの算出
+			if (shm->meas_st<=(j+1) && (j+1)<=shm->meas_ed) {
+				shm->meas_data+=GATE_COUNT(total/m);
+			}
 		}
+		// 測定値
+		fprintf(fp, "meas data,%d\r\n", shm->meas_data);
 		fclose(fp);
 		ret=0;
 	}
@@ -1643,6 +1651,7 @@ static int mutex_init(void)
 		shm->gate_time=10L;
 		shm->meas_st=10L;
 		shm->meas_ed=11L;
+		shm->meas_data=0L;
 	}
 	/* 既に起動済 */
 	else{

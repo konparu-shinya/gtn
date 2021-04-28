@@ -15,6 +15,7 @@ struct _shm {
 	long	gate_time;		// ゲートタイムmsec
 	long	meas_st;		// 測定開始区間
 	long	meas_ed;		// 測定終了区間
+	long	meas_data;		// 測定値
 } static *shm;
 
 static VALUE fwiringPiSpi_datarw(VALUE self, VALUE arg)
@@ -71,6 +72,11 @@ static VALUE fwiringPiSpi_meas_points(VALUE self, VALUE arg1, VALUE arg2)
 	return self;
 }
 
+static VALUE fwiringPiSpi_meas_data(VALUE self)
+{
+	return INT2FIX(shm->meas_data);
+}
+
 static int mutex_init(void)
 {
 	pthread_mutexattr_t mat;
@@ -103,6 +109,7 @@ static int mutex_init(void)
 		shm->gate_time=10L;
 		shm->meas_st=10L;
 		shm->meas_ed=11L;
+		shm->meas_data=0L;
 	}
 	/* 既に起動済 */
 	else{
@@ -122,6 +129,7 @@ void Init_WiringPiSpi(void)
 	rb_define_method(cWiringPi, "foton_count", fwiringPiSpi_foton_count, 0);
 	rb_define_method(cWiringPi, "gate_time", fwiringPiSpi_gate_time, 1);
 	rb_define_method(cWiringPi, "meas_points", fwiringPiSpi_meas_points, 2);
+	rb_define_method(cWiringPi, "meas_data", fwiringPiSpi_meas_data, 0);
 
 	mutex_init();
 }
