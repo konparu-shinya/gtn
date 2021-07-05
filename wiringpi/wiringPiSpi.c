@@ -16,6 +16,8 @@ struct _shm {
 	long	meas_st;		// 測定開始区間
 	long	meas_ed;		// 測定終了区間
 	long	meas_data;		// 測定値
+	float	fact2_a;		// 外部温度係数a
+	float	fact2_b;		// 外部温度係数b
 } static *shm;
 
 static VALUE fwiringPiSpi_datarw(VALUE self, VALUE arg)
@@ -77,6 +79,13 @@ static VALUE fwiringPiSpi_meas_data(VALUE self)
 	return INT2FIX(shm->meas_data);
 }
 
+static VALUE fwiringPiSpi_fact2(VALUE self, VALUE arg1, VALUE arg2)
+{
+	shm->fact2_a = NUM2DBL(arg1);
+	shm->fact2_b = NUM2DBL(arg2);
+	return self;
+}
+
 static int mutex_init(void)
 {
 	pthread_mutexattr_t mat;
@@ -110,6 +119,8 @@ static int mutex_init(void)
 		shm->meas_st=10L;
 		shm->meas_ed=11L;
 		shm->meas_data=0L;
+		shm->fact2_a=1;
+		shm->fact2_b=0;
 	}
 	/* 既に起動済 */
 	else{
@@ -130,6 +141,8 @@ void Init_WiringPiSpi(void)
 	rb_define_method(cWiringPi, "gate_time", fwiringPiSpi_gate_time, 1);
 	rb_define_method(cWiringPi, "meas_points", fwiringPiSpi_meas_points, 2);
 	rb_define_method(cWiringPi, "meas_data", fwiringPiSpi_meas_data, 0);
+	rb_define_method(cWiringPi, "fact2", fwiringPiSpi_fact2, 2);
+
 
 	mutex_init();
 }

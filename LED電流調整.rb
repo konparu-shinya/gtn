@@ -22,9 +22,16 @@ $led_conf = []
 $fact_a = 0.0256
 $fact_b = -28.084
 
+$fact2_a = 0.0256
+$fact2_b = -28.084
+
 def hex2temp(a)
 # return (a*0.0256-28.084).round(2)
   return (a*$fact_a+$fact_b).round(2)
+end
+
+def hex2temp2(a)
+  return (a*$fact2_a+$fact2_b).round(2)
 end
 
 def temp2hex(a)
@@ -33,7 +40,7 @@ def temp2hex(a)
 end
 
 class Window
-  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed, :lblPumpVal, :lblMeasDt
+  attr_accessor :spi, :entAna, :lblLVal, :lblLA, :lblTVal, :lblTVal2, :lblCount, :lblTime, :lblTm2, :lblErr, :time_st, :time_st2, :entLED, :cbOnOff, :cbOverLed, :lblPumpVal, :lblMeasDt
 
   def initialize
     @spi = WiringPiSpi.new
@@ -109,14 +116,23 @@ class Window
     @entTMP.set_xalign(1)
     lblDo     = Gtk::Label.new("℃");
     @lblTVal  = Gtk::Label.new("-");
-    lblTMPCfga  = Gtk::Label.new("温度係数a");
-    @entTMPCfga = Gtk::Entry.new
-    lblTMPCfgb  = Gtk::Label.new("温度係数b");
-    @entTMPCfgb = Gtk::Entry.new
-    @entTMPCfga.set_text("#{$fact_a}")
-    @entTMPCfga.set_xalign(1)
-    @entTMPCfgb.set_text("#{$fact_b}")
-    @entTMPCfgb.set_xalign(1)
+    lblTMPCfg1a  = Gtk::Label.new("温度係数1a");
+    @entTMPCfg1a = Gtk::Entry.new
+    lblTMPCfg1b  = Gtk::Label.new("温度係数1b");
+    @entTMPCfg1b = Gtk::Entry.new
+    @entTMPCfg1a.set_text("#{$fact_a}")
+    @entTMPCfg1a.set_xalign(1)
+    @entTMPCfg1b.set_text("#{$fact_b}")
+    @entTMPCfg1b.set_xalign(1)
+    lblTMPCfg2a  = Gtk::Label.new("温度係数2a");
+    @entTMPCfg2a = Gtk::Entry.new
+    @lblTVal2 = Gtk::Label.new("-");
+    lblTMPCfg2b  = Gtk::Label.new("温度係数2b");
+    @entTMPCfg2b = Gtk::Entry.new
+    @entTMPCfg2a.set_text("#{$fact2_a}")
+    @entTMPCfg2a.set_xalign(1)
+    @entTMPCfg2b.set_text("#{$fact2_b}")
+    @entTMPCfg2b.set_xalign(1)
 
     lblPumpCfg  = Gtk::Label.new("ポンプ設定");
     @entPumpCfg = Gtk::Entry.new
@@ -136,11 +152,17 @@ class Window
           when 'temp_sv'
             @entTMP.set_text("#{ary[1]}") if ary[1]
           when 'fact_a'
-            @entTMPCfga.set_text("#{ary[1]}") if ary[1]
-            $fact_a = @entTMPCfga.text.to_f
+            @entTMPCfg1a.set_text("#{ary[1]}") if ary[1]
+            $fact_a = @entTMPCfg1a.text.to_f
           when 'fact_b'
-            @entTMPCfgb.set_text("#{ary[1]}") if ary[1]
-            $fact_b = @entTMPCfgb.text.to_f
+            @entTMPCfg1b.set_text("#{ary[1]}") if ary[1]
+            $fact_b = @entTMPCfg1b.text.to_f
+          when 'fact2_a'
+            @entTMPCfg2a.set_text("#{ary[1]}") if ary[1]
+            $fact2_a = @entTMPCfg2a.text.to_f
+          when 'fact2_b'
+            @entTMPCfg2b.set_text("#{ary[1]}") if ary[1]
+            $fact2_b = @entTMPCfg2b.text.to_f
           when 'gate_time'
             @entGT.set_text("#{ary[1]}") if ary[1]
           when 'led_on_tm'
@@ -170,6 +192,7 @@ class Window
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
     @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    @spi.fact2($fact2_a, $fact2_b)
 
     # pump on/off
     value = @entPumpCfg.text.to_i
@@ -181,12 +204,22 @@ class Window
       set_temp_value
     end
 
-    @entTMPCfga.signal_connect('changed') do 
-      $fact_a = @entTMPCfga.text.to_f
+    @entTMPCfg1a.signal_connect('changed') do 
+      $fact_a = @entTMPCfg1a.text.to_f
     end
 
-    @entTMPCfgb.signal_connect('changed') do 
-      $fact_b = @entTMPCfgb.text.to_f
+    @entTMPCfg1b.signal_connect('changed') do 
+      $fact_b = @entTMPCfg1b.text.to_f
+    end
+
+    @entTMPCfg2a.signal_connect('changed') do 
+      $fact2_a = @entTMPCfg2a.text.to_f
+      @spi.fact2($fact2_a, $fact2_b)
+    end
+
+    @entTMPCfg2b.signal_connect('changed') do 
+      $fact2_b = @entTMPCfg2b.text.to_f
+      @spi.fact2($fact2_a, $fact2_b)
     end
 
     @entLED.signal_connect('changed') do 
@@ -293,19 +326,24 @@ class Window
     tbl.attach_defaults(@lblMeasDt, 2, 4,14,15)
     tbl.attach_defaults(@lblLedErr, 2, 7,15,16)
 
-    tbl.attach_defaults(lblTMP,     0, 2,16,17)
-    tbl.attach_defaults(@entTMP,    2, 5,16,17)
-    tbl.attach_defaults(lblDo,      5, 6,16,17)
-    tbl.attach_defaults(@lblTVal,   6, 7,16,17)
-    tbl.attach_defaults(lblTMPCfga, 0, 2,17,18)
-    tbl.attach_defaults(@entTMPCfga,2, 5,17,18)
-    tbl.attach_defaults(lblTMPCfgb, 0, 2,18,19)
-    tbl.attach_defaults(@entTMPCfgb,2, 5,18,19)
+    tbl.attach_defaults(lblTMP,      0, 2,16,17)
+    tbl.attach_defaults(@entTMP,     2, 5,16,17)
+    tbl.attach_defaults(lblDo,       5, 6,16,17)
+    tbl.attach_defaults(@lblTVal,    6, 7,16,17)
+    tbl.attach_defaults(lblTMPCfg1a, 0, 2,17,18)
+    tbl.attach_defaults(@entTMPCfg1a,2, 5,17,18)
+    tbl.attach_defaults(lblTMPCfg1b, 0, 2,18,19)
+    tbl.attach_defaults(@entTMPCfg1b,2, 5,18,19)
+    tbl.attach_defaults(lblTMPCfg2a, 0, 2,19,20)
+    tbl.attach_defaults(@entTMPCfg2a,2, 5,19,20)
+    tbl.attach_defaults(@lblTVal2,   6, 7,19,20)
+    tbl.attach_defaults(lblTMPCfg2b, 0, 2,20,21)
+    tbl.attach_defaults(@entTMPCfg2b,2, 5,20,21)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,20,21)
-    tbl.attach_defaults(@entPumpCfg,2, 5,20,21)
-    tbl.attach_defaults(lblUnit4,   5, 7,20,21)
-    tbl.attach_defaults(@lblPumpVal,6, 7,21,22)
+    tbl.attach_defaults(lblPumpCfg, 0, 2,22,23)
+    tbl.attach_defaults(@entPumpCfg,2, 5,22,23)
+    tbl.attach_defaults(lblUnit4,   5, 7,22,23)
+    tbl.attach_defaults(@lblPumpVal,6, 7,23,24)
 
     win.add(tbl)
     win.show_all()
@@ -372,7 +410,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -419,6 +457,12 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'meas_ed'
         fw << "meas_ed=#{@entMeasEd.text.to_i}\n"
         set_flag[12] = true
+      when 'fact2_a'
+        fw << "fact2_a=#{$fact2_a}\n"
+        set_flag[13] = true
+      when 'fact2_b'
+        fw << "fact2_b=#{$fact2_b}\n"
+        set_flag[14] = true
       else
         fw << line
       end
@@ -437,6 +481,8 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "over_led=#{(@cbOverLed.active?)?"true":"flase"}\n" if set_flag[10] == nil
     fw << "meas_st=#{@entMeasSt.text.to_i}\n" if set_flag[11] == nil
     fw << "meas_ed=#{@entMeasEd.text.to_i}\n" if set_flag[12] == nil
+    fw << "fact2_a=#{$fact2_a}\n" if set_flag[13] == nil
+    fw << "fact2_b=#{$fact2_b}\n" if set_flag[14] == nil
     fw.close
 
     Gtk.main_quit()
@@ -524,10 +570,16 @@ Gtk.timeout_add( 1000 ) do
     p [__LINE__, "#{((ary[2]<<6)&0xfc0)+(ary[3]&0x3f)}"] if ary[0]==1
   end
 
-  # 温度
+  # 温度(反応部)
   if ($count[1]%5) == 0
     ary = w.spi.dataRW([0x06,0x40,0x80,0xc0])
     w.lblTVal.set_text("#{hex2temp(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
+  end
+
+  # 温度(装置内部)
+  if ($count[1]%5) == 0
+    ary = w.spi.dataRW([0x07,0x40,0x80,0xc0])
+    w.lblTVal2.set_text("#{hex2temp2(((ary[2]<<6)&0xfc0)+(ary[3]&0x3f))}") if ary[0]==1
   end
 
   # LED ON/OFF

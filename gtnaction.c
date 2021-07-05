@@ -53,6 +53,8 @@ struct _shm {
 	long	meas_st;		// 測定開始区間
 	long	meas_ed;		// 測定終了区間
 	long	meas_data;		// 測定値
+	float	fact2_a;		// 外部温度係数a
+	float	fact2_b;		// 外部温度係数b
 } static *shm;
 
 // ラズパイのSPI1はモード3指定ができないのでGPIOでSPI制御する
@@ -135,6 +137,7 @@ struct _cnt_tbl {
 	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
 	long tm_fpga[2000*CNT_SZ];			// FPGAのカウント時刻
 	int	mkflag[2000];
+	int	temp[2000];						// 装置内部温度
 } static cnt_tbl={0, 0, 0};
 
 // フォトンカウント取り込みバッファテーブル
@@ -570,11 +573,22 @@ static int ppm_init(int ch)
 	return (pctrl->driving==5) ? 0:1;
 }
 
+// 0秒からのFPGA時刻に変換する
+static long fpga_time(long tm)
+{
+	long ret=tm-cnt_tbl.tim_start_fpga;
+	// 最大時刻は18bit(0x3ffff)
+	if (cnt_tbl.tim_start_fpga>tm) {
+		ret=0x3ffff-cnt_tbl.tim_start_fpga+tm+1;
+	}
+	return ret;
+}
+
 // フォトンカウント取り込み 10msec周期に取り込む
 static void count_dev_rcv(void)
 {
 	struct timespec tim_now=tim_get_now();
-	int over_led=0;
+	int over_led=0, jiffies=0;
 	// 10msec毎にフォトンカウント取り込み
 	if (tim_timeup(tim_now, cnt_dev_tbl.exec_tim, 0)) {
 		unsigned char data1[4]={0x14,0x40,0x80,0xc0};// フォトンカウント(FPGAは10msec周期でPMTのフォトンをカウントしSPIで送る)
@@ -582,12 +596,28 @@ static void count_dev_rcv(void)
 		pthread_mutex_lock(&shm->mutex);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data1, 4);
 		wiringPiSPIDataRW(MAX_SPI_CHANNEL, data2, 4);
+		jiffies = ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
 		pthread_mutex_unlock(&shm->mutex);
 
 		// FPGAの取込み開始時刻として記録
 		if (cnt_tbl.tim_start_fpga<0) {
 			cnt_tbl.tim_start_fpga = ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
 		}
+		// 1秒ごとに内部温度取り込み
+		else {
+		static long bk=-1;
+			long t = fpga_time(jiffies)/100;
+			if (bk!=t && t<2000) {
+				unsigned char data[4]={0x07,0x40,0x80,0xc0};
+				pthread_mutex_lock(&shm->mutex);
+				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
+				cnt_tbl.temp[t] = ((data[2]&0x3f)<<6)+(data[3]&0x3f);
+				pthread_mutex_unlock(&shm->mutex);
+			}
+			bk=t;
+//printf("%s %d %10ld %10d\n", __FILE__, __LINE__, t, jiffies);
+		}
+
 		// エラー発生
 		if (data1[0]&0x20) {
 			unsigned char data3[4]={0x1f,0x40,0x80,0xc0};
@@ -626,7 +656,7 @@ static void count_dev_rcv(void)
 //printf("%s %d %d\n", __FILE__, __LINE__, cnt_dev_tbl.n);
 		// (過大光の場合はカウントの最上位ビットを1にする)
 			cnt_dev_tbl.buf[cnt_dev_tbl.wr]=((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f) + ((over_led)?0x80000000:0);
-			cnt_dev_tbl.tm_fpga[cnt_dev_tbl.wr]=((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f);
+			cnt_dev_tbl.tm_fpga[cnt_dev_tbl.wr]=jiffies;
 			cnt_dev_tbl.tm[cnt_dev_tbl.wr]=tim_now;
 
 			cnt_dev_tbl.wr = (cnt_dev_tbl.wr+1)%CNT_DEV_SZ;
@@ -706,17 +736,6 @@ static long get_1st_data(long buf[], int n, int *psts)
 	return GATE_COUNT(total/m);
 }
 
-// 0秒からのFPGA時刻に変換する
-static long fpga_time(long tm)
-{
-	long ret=tm-cnt_tbl.tim_start_fpga;
-	// 最大時刻は18bit(0x3ffff)
-	if (cnt_tbl.tim_start_fpga>tm) {
-		ret=0x3ffff-cnt_tbl.tim_start_fpga+tm+1;
-	}
-	return ret;
-}
-
 // カウント値をファイルに保存する
 static int count_save(char *str)
 {
@@ -733,7 +752,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	if (fp) {
 		// header
 		if (cnt_tbl.mode==1) {
-			fprintf(fp, "no.,count,flag,n,light,time\r\n");
+			fprintf(fp, "no.,count,flag,temp,n,light,time\r\n");
 		}
 		for (i=0, j=0; i<cnt_tbl.n; j++) {
 			unsigned long total=0L;
@@ -767,11 +786,13 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				fprintf(fp, "%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
+				float temp=(float)cnt_tbl.temp[j]*shm->fact2_a+shm->fact2_b;
+				fprintf(fp, "%4d,%10ld,%d,%.1f,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp, m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 10ms生データ出力
 			else if (cnt_tbl.mode==0) {
-				fprintf(fp, "1,%4d,%10ld,%d,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], m, over_led, cnt_tbl.tm_fpga[i-1]);
+				float temp=(float)cnt_tbl.temp[j]*shm->fact2_a+shm->fact2_b;
+				fprintf(fp, "1,%4d,%10ld,%d,%.1f,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp, m, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 測定区間データの算出
 			if (shm->meas_st<=(j+1) && (j+1)<=shm->meas_ed) {
@@ -1652,6 +1673,8 @@ static int mutex_init(void)
 		shm->meas_st=10L;
 		shm->meas_ed=11L;
 		shm->meas_data=0L;
+		shm->fact2_a=1;
+		shm->fact2_b=0;
 	}
 	/* 既に起動済 */
 	else{
