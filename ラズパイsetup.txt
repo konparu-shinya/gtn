@@ -72,3 +72,13 @@ autostart
 $ mkdir -p ~/.config/lxsession/LXDE-pi
 $ cp /etc/xdg/lxsession/LXDE-pi/autostart ~/.config/lxsession/LXDE-pi/
 あとは、~/.config/lxsession/LXDE-pi/autostartファイルに実行したいコマンド名を追記するだけです。
+--- sample ---
+@xset s off
+@xset s noblank
+@xset -dpms
+/home/pi/gtn/gtnaction
+/home/pi/gtn/gtn.rb
+/home/pi/gtn/LED電流調整.rb
+
+
+
