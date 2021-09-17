@@ -53,6 +53,8 @@ struct _shm {
 	long	meas_st;		// 測定開始区間
 	long	meas_ed;		// 測定終了区間
 	long	meas_data;		// 測定値
+	float	fact1_a;		// 反応部温度係数a
+	float	fact1_b;		// 反応部温度係数b
 	float	fact2_a;		// 外部温度係数a
 	float	fact2_b;		// 外部温度係数b
 } static *shm;
@@ -137,7 +139,9 @@ struct _cnt_tbl {
 	struct timespec tm[2000*CNT_SZ];	// 取込み時刻
 	long tm_fpga[2000*CNT_SZ];			// FPGAのカウント時刻
 	int	mkflag[2000];
-	int	temp[2000];						// 装置内部温度
+	int	temp1[2000];					// 反応部温度
+	int	temp2[2000];					// 装置内部温度
+	int	led_onoff[2000];				// LEDのON/OFF状態
 } static cnt_tbl={0, 0, 0};
 
 // フォトンカウント取り込みバッファテーブル
@@ -608,27 +612,36 @@ static void count_dev_rcv(void)
 		static long bk=-1;
 			long t = fpga_time(jiffies)/100;
 			if (bk!=t && t<2000) {
-				unsigned char data[4]={0x07,0x40,0x80,0xc0};
+				unsigned char data11[4]={0x07,0x40,0x80,0xc0};// 装置内部温度
+				unsigned char data12[4]={0x06,0x40,0x80,0xc0};// 反応部温度
+				unsigned char data13[4]={0x02,0x40,0x80,0xc0};// LED状態
 				pthread_mutex_lock(&shm->mutex);
-				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data, 4);
-				cnt_tbl.temp[t] = ((data[2]&0x3f)<<6)+(data[3]&0x3f);
+				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data11, 4);
+				cnt_tbl.temp2[t] = ((data11[2]&0x3f)<<6)+(data11[3]&0x3f);
+
+				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data12, 4);
+				cnt_tbl.temp1[t] = ((data12[2]&0x3f)<<6)+(data12[3]&0x3f);
+
+				wiringPiSPIDataRW(MAX_SPI_CHANNEL, data13, 4);
+				cnt_tbl.led_onoff[t] = (data13[3]&0x01);
 				pthread_mutex_unlock(&shm->mutex);
+
+				// エラー発生
+				if (data1[0]&0x20) {
+					unsigned char data3[4]={0x1f,0x40,0x80,0xc0};
+					unsigned char data4[4]={0x3f,0x40,0x80,0xc1};
+					pthread_mutex_lock(&shm->mutex);
+					wiringPiSPIDataRW(MAX_SPI_CHANNEL, data3, 4);// error flag
+					wiringPiSPIDataRW(MAX_SPI_CHANNEL, data4, 4);// reset
+					pthread_mutex_unlock(&shm->mutex);
+					// 過大光判定
+					over_led = (data3[3]&0x02)?1:0;
+				}
 			}
 			bk=t;
 //printf("%s %d %10ld %10d\n", __FILE__, __LINE__, t, jiffies);
 		}
 
-		// エラー発生
-		if (data1[0]&0x20) {
-			unsigned char data3[4]={0x1f,0x40,0x80,0xc0};
-			unsigned char data4[4]={0x3f,0x40,0x80,0xc1};
-			pthread_mutex_lock(&shm->mutex);
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data3, 4);// error flag
-			wiringPiSPIDataRW(MAX_SPI_CHANNEL, data4, 4);// reset
-			pthread_mutex_unlock(&shm->mutex);
-			// 過大光判定
-			over_led = (data3[3]&0x02)?1:0;
-		}
 //printf("%s %d %d %02X %02X %8d %8d %10d %10d %10d %10d\n", __FILE__, __LINE__, over_led, data1[0]&0x02, data1[0]&0x04, tim_now.tv_sec, cnt_dev_tbl.exec_tim.tv_sec, tim_now.tv_nsec, cnt_dev_tbl.exec_tim.tv_nsec, ((data1[1]&0x3f)<<12)+((data1[2]&0x3f)<<6)+(data1[3]&0x3f), ((data2[1]&0x3f)<<12)+((data2[2]&0x3f)<<6)+(data2[3]&0x3f));
 		// 過大光の場合
 		if (over_led) {
@@ -752,7 +765,7 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	if (fp) {
 		// header
 		if (cnt_tbl.mode==1) {
-			fprintf(fp, "no.,count,flag,temp,n,light,time\r\n");
+			fprintf(fp, "no.,count,flag,detect temp,n,light 1:ON,body temp,excessive light 1:over,time\r\n");
 		}
 		for (i=0, j=0; i<cnt_tbl.n; j++) {
 			unsigned long total=0L;
@@ -786,13 +799,15 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 			}
 			// 1secごとのファイル出力
 			if (cnt_tbl.mode==1) {
-				float temp=(float)cnt_tbl.temp[j]*shm->fact2_a+shm->fact2_b;
-				fprintf(fp, "%4d,%10ld,%d,%.1f,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp, m, over_led, cnt_tbl.tm_fpga[i-1]);
+				float temp1=(float)cnt_tbl.temp1[j]*shm->fact1_a+shm->fact1_b;
+				float temp2=(float)cnt_tbl.temp2[j]*shm->fact2_a+shm->fact2_b;
+				fprintf(fp, "%4d,%10ld,%d,%.1f,%d,%d,%.1f,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp1, m, cnt_tbl.led_onoff[j], temp2, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 10ms生データ出力
 			else if (cnt_tbl.mode==0) {
-				float temp=(float)cnt_tbl.temp[j]*shm->fact2_a+shm->fact2_b;
-				fprintf(fp, "1,%4d,%10ld,%d,%.1f,%d,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp, m, over_led, cnt_tbl.tm_fpga[i-1]);
+				float temp1=(float)cnt_tbl.temp1[j]*shm->fact1_a+shm->fact1_b;
+				float temp2=(float)cnt_tbl.temp2[j]*shm->fact2_a+shm->fact2_b;
+				fprintf(fp, "1,%4d,%10ld,%d,%.1f,%d,%d,%.1f,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp1, m, cnt_tbl.led_onoff[j], temp2, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 測定区間データの算出
 			if (shm->meas_st<=(j+1) && (j+1)<=shm->meas_ed) {
@@ -1673,6 +1688,8 @@ static int mutex_init(void)
 		shm->meas_st=10L;
 		shm->meas_ed=11L;
 		shm->meas_data=0L;
+		shm->fact1_a=1;
+		shm->fact1_b=0;
 		shm->fact2_a=1;
 		shm->fact2_b=0;
 	}

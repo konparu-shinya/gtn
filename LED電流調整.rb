@@ -192,7 +192,7 @@ class Window
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
     @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
-    @spi.fact2($fact2_a, $fact2_b)
+    @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
 
     # pump on/off
     value = @entPumpCfg.text.to_i
@@ -206,20 +206,22 @@ class Window
 
     @entTMPCfg1a.signal_connect('changed') do 
       $fact_a = @entTMPCfg1a.text.to_f
+      @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
     end
 
     @entTMPCfg1b.signal_connect('changed') do 
       $fact_b = @entTMPCfg1b.text.to_f
+      @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
     end
 
     @entTMPCfg2a.signal_connect('changed') do 
       $fact2_a = @entTMPCfg2a.text.to_f
-      @spi.fact2($fact2_a, $fact2_b)
+      @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
     end
 
     @entTMPCfg2b.signal_connect('changed') do 
       $fact2_b = @entTMPCfg2b.text.to_f
-      @spi.fact2($fact2_a, $fact2_b)
+      @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
     end
 
     @entLED.signal_connect('changed') do 
