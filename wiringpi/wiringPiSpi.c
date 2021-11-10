@@ -13,9 +13,12 @@ struct _shm {
 	pthread_mutex_t mutex;	// ミューテックス
 	long	count;			// フォトンカウント値
 	long	gate_time;		// ゲートタイムmsec
-	long	meas_st;		// 測定開始区間
-	long	meas_ed;		// 測定終了区間
-	long	meas_data;		// 測定値
+	long	meas_st1;		// 測定開始区間1
+	long	meas_ed1;		// 測定終了区間1
+	long	meas_st2;		// 測定開始区間2
+	long	meas_ed2;		// 測定終了区間2
+	long	meas_data1;		// 測定値1
+	long	meas_data2;		// 測定値2
 	float	fact1_a;		// 反応部温度係数a
 	float	fact1_b;		// 反応部温度係数b
 	float	fact2_a;		// 外部温度係数a
@@ -69,16 +72,23 @@ static VALUE fwiringPiSpi_gate_time(VALUE self, VALUE arg1)
 	return self;
 }
 
-static VALUE fwiringPiSpi_meas_points(VALUE self, VALUE arg1, VALUE arg2)
+static VALUE fwiringPiSpi_meas_points(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4)
 {
-	shm->meas_st = FIX2INT(arg1);
-	shm->meas_ed = FIX2INT(arg2);
+	shm->meas_st1 = FIX2INT(arg1);
+	shm->meas_ed1 = FIX2INT(arg2);
+	shm->meas_st2 = FIX2INT(arg3);
+	shm->meas_ed2 = FIX2INT(arg4);
 	return self;
 }
 
-static VALUE fwiringPiSpi_meas_data(VALUE self)
+static VALUE fwiringPiSpi_meas_data1(VALUE self)
 {
-	return INT2FIX(shm->meas_data);
+	return INT2FIX(shm->meas_data1);
+}
+
+static VALUE fwiringPiSpi_meas_data2(VALUE self)
+{
+	return INT2FIX(shm->meas_data2);
 }
 
 static VALUE fwiringPiSpi_fact2(VALUE self, VALUE arg1, VALUE arg2, VALUE arg3, VALUE arg4)
@@ -120,9 +130,12 @@ static int mutex_init(void)
 		pthread_mutex_init(&shm->mutex, &mat);
 		shm->count=0L;
 		shm->gate_time=10L;
-		shm->meas_st=10L;
-		shm->meas_ed=11L;
-		shm->meas_data=0L;
+		shm->meas_st1=10L;
+		shm->meas_ed1=11L;
+		shm->meas_st2=10L;
+		shm->meas_ed2=11L;
+		shm->meas_data1=0L;
+		shm->meas_data2=0L;
 		shm->fact1_a=1;
 		shm->fact1_b=0;
 		shm->fact2_a=1;
@@ -145,8 +158,9 @@ void Init_WiringPiSpi(void)
 	rb_define_method(cWiringPi, "dataRW", fwiringPiSpi_datarw, 1);
 	rb_define_method(cWiringPi, "foton_count", fwiringPiSpi_foton_count, 0);
 	rb_define_method(cWiringPi, "gate_time", fwiringPiSpi_gate_time, 1);
-	rb_define_method(cWiringPi, "meas_points", fwiringPiSpi_meas_points, 2);
-	rb_define_method(cWiringPi, "meas_data", fwiringPiSpi_meas_data, 0);
+	rb_define_method(cWiringPi, "meas_points", fwiringPiSpi_meas_points, 4);
+	rb_define_method(cWiringPi, "meas_data1", fwiringPiSpi_meas_data1, 0);
+	rb_define_method(cWiringPi, "meas_data2", fwiringPiSpi_meas_data2, 0);
 	rb_define_method(cWiringPi, "fact2", fwiringPiSpi_fact2, 4);
 
 

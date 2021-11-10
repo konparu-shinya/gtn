@@ -50,9 +50,12 @@ struct _shm {
 	pthread_mutex_t mutex;	// ミューテックス
 	long	count;			// フォトンカウント値
 	long	gate_time;		// ゲートタイムmsec
-	long	meas_st;		// 測定開始区間
-	long	meas_ed;		// 測定終了区間
-	long	meas_data;		// 測定値
+	long	meas_st1;		// 測定開始区間1
+	long	meas_ed1;		// 測定終了区間1
+	long	meas_st2;		// 測定開始区間2
+	long	meas_ed2;		// 測定終了区間2
+	long	meas_data1;		// 測定値1
+	long	meas_data2;		// 測定値2
 	float	fact1_a;		// 反応部温度係数a
 	float	fact1_b;		// 反応部温度係数b
 	float	fact2_a;		// 外部温度係数a
@@ -758,7 +761,8 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 	int ret=-1;
 	int i, j;
 	FILE *fp;
-	shm->meas_data=0L;
+	shm->meas_data1=0L;
+	shm->meas_data2=0L;
 	strftime(str, 32, "/tmp/%y%m%d%H%M%S.csv", localtime(&cnt_tbl.t));
 	fp=fopen(str, "w");
 //printf("%s %d %4d\n", __FILE__, __LINE__, cnt_tbl.n);
@@ -810,12 +814,15 @@ const double f11=0.000473, f12=-0.9391, f21=0.000483, f22=1.938145;
 				fprintf(fp, "1,%4d,%10ld,%d,%.1f,%d,%d,%.1f,%d,%d\r\n", j+1, (m>0)?GATE_COUNT(total/m):0L, cnt_tbl.mkflag[j-1], temp1, m, cnt_tbl.led_onoff[j], temp2, over_led, cnt_tbl.tm_fpga[i-1]);
 			}
 			// 測定区間データの算出
-			if (shm->meas_st<=(j+1) && (j+1)<=shm->meas_ed) {
-				shm->meas_data+=GATE_COUNT(total/m);
+			if (shm->meas_st1<=(j+1) && (j+1)<=shm->meas_ed1) {
+				shm->meas_data1+=GATE_COUNT(total/m);
+			}
+			if (shm->meas_st2<=(j+1) && (j+1)<=shm->meas_ed2) {
+				shm->meas_data2+=GATE_COUNT(total/m);
 			}
 		}
 		// 測定値
-		fprintf(fp, "meas data,%d\r\n", shm->meas_data);
+		fprintf(fp, "meas data,%d,%d\r\n", shm->meas_data1, shm->meas_data2);
 		fclose(fp);
 		ret=0;
 	}
@@ -1685,9 +1692,12 @@ static int mutex_init(void)
 		pthread_mutex_init(&shm->mutex, &mat);
 		shm->count=0L;
 		shm->gate_time=10L;
-		shm->meas_st=10L;
-		shm->meas_ed=11L;
-		shm->meas_data=0L;
+		shm->meas_st1=10L;
+		shm->meas_ed1=11L;
+		shm->meas_st2=10L;
+		shm->meas_ed2=11L;
+		shm->meas_data1=0L;
+		shm->meas_data2=0L;
 		shm->fact1_a=1;
 		shm->fact1_b=0;
 		shm->fact2_a=1;

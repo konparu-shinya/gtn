@@ -99,14 +99,22 @@ class Window
     @entCntTime.set_xalign(1)
     lblUnit3   = Gtk::Label.new("x0.1msec(0-99)");
     @lblLedErr = Gtk::Label.new("");
-    lblMeasSt  = Gtk::Label.new("測光開始");
-    @entMeasSt = Gtk::Entry.new
-    @entMeasSt.set_text("10")
-    @entMeasSt.set_xalign(1)
-    lblMeasEd  = Gtk::Label.new("測光終了");
-    @entMeasEd = Gtk::Entry.new
-    @entMeasEd.set_text("10")
-    @entMeasEd.set_xalign(1)
+    lblMeasSt1  = Gtk::Label.new("測光開始1");
+    @entMeasSt1 = Gtk::Entry.new
+    @entMeasSt1.set_text("10")
+    @entMeasSt1.set_xalign(1)
+    lblMeasEd1  = Gtk::Label.new("測光終了1");
+    @entMeasEd1 = Gtk::Entry.new
+    @entMeasEd1.set_text("10")
+    @entMeasEd1.set_xalign(1)
+    lblMeasSt2  = Gtk::Label.new("測光開始2");
+    @entMeasSt2 = Gtk::Entry.new
+    @entMeasSt2.set_text("10")
+    @entMeasSt2.set_xalign(1)
+    lblMeasEd2  = Gtk::Label.new("測光終了2");
+    @entMeasEd2 = Gtk::Entry.new
+    @entMeasEd2.set_text("10")
+    @entMeasEd2.set_xalign(1)
     @lblMeasDt = Gtk::Label.new("");
 
     lblTMP    = Gtk::Label.new("設定温度");
@@ -178,9 +186,13 @@ class Window
           when 'over_led'
             @cbOverLed.active = ("#{ary[1]}"=="true")?true:false if ary[1]
           when 'meas_st'
-            @entMeasSt.set_text("#{ary[1]}") if ary[1]
+            @entMeasSt1.set_text("#{ary[1]}") if ary[1]
           when 'meas_ed'
-            @entMeasEd.set_text("#{ary[1]}") if ary[1]
+            @entMeasEd1.set_text("#{ary[1]}") if ary[1]
+          when 'meas_st2'
+            @entMeasSt2.set_text("#{ary[1]}") if ary[1]
+          when 'meas_ed2'
+            @entMeasEd2.set_text("#{ary[1]}") if ary[1]
           end
         end
       end
@@ -191,7 +203,7 @@ class Window
     set_led_on_off(false)
     set_temp_value
     @spi.gate_time(@entGT.text.to_i)
-    @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    @spi.meas_points(@entMeasSt1.text.to_i, @entMeasEd1.text.to_i, @entMeasSt2.text.to_i, @entMeasEd2.text.to_i)
     @spi.fact2($fact_a, $fact_b, $fact2_a, $fact2_b)
 
     # pump on/off
@@ -273,12 +285,20 @@ class Window
       @spi.gate_time(i)
     end
 
-    @entMeasSt.signal_connect('changed') do 
-      @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    @entMeasSt1.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt1.text.to_i, @entMeasEd1.text.to_i, @entMeasSt2.text.to_i, @entMeasEd2.text.to_i)
     end
 
-    @entMeasEd.signal_connect('changed') do 
-      @spi.meas_points(@entMeasSt.text.to_i, @entMeasEd.text.to_i)
+    @entMeasEd1.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt1.text.to_i, @entMeasEd1.text.to_i, @entMeasSt2.text.to_i, @entMeasEd2.text.to_i)
+    end
+
+    @entMeasSt2.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt1.text.to_i, @entMeasEd1.text.to_i, @entMeasSt2.text.to_i, @entMeasEd2.text.to_i)
+    end
+
+    @entMeasEd2.signal_connect('changed') do 
+      @spi.meas_points(@entMeasSt1.text.to_i, @entMeasEd1.text.to_i, @entMeasSt2.text.to_i, @entMeasEd2.text.to_i)
     end
 
     @entPumpCfg.signal_connect('changed') do 
@@ -321,31 +341,35 @@ class Window
     tbl.attach_defaults(lblCntTime, 0, 2,11,12)
     tbl.attach_defaults(@entCntTime,2, 5,11,12)
     tbl.attach_defaults(lblUnit3,   5, 7,11,12)
-    tbl.attach_defaults(lblMeasSt,  0, 2,12,13)
-    tbl.attach_defaults(@entMeasSt, 2, 5,12,13)
-    tbl.attach_defaults(lblMeasEd,  0, 2,13,14)
-    tbl.attach_defaults(@entMeasEd, 2, 5,13,14)
-    tbl.attach_defaults(@lblMeasDt, 2, 4,14,15)
-    tbl.attach_defaults(@lblLedErr, 2, 7,15,16)
+    tbl.attach_defaults(lblMeasSt1, 0, 2,12,13)
+    tbl.attach_defaults(@entMeasSt1,2, 5,12,13)
+    tbl.attach_defaults(lblMeasEd1, 0, 2,13,14)
+    tbl.attach_defaults(@entMeasEd1,2, 5,13,14)
+    tbl.attach_defaults(lblMeasSt2, 0, 2,14,15)
+    tbl.attach_defaults(@entMeasSt2,2, 5,14,15)
+    tbl.attach_defaults(lblMeasEd2, 0, 2,15,16)
+    tbl.attach_defaults(@entMeasEd2,2, 5,15,16)
+    tbl.attach_defaults(@lblMeasDt, 2, 4,16,17)
+    tbl.attach_defaults(@lblLedErr, 2, 7,17,18)
 
-    tbl.attach_defaults(lblTMP,      0, 2,16,17)
-    tbl.attach_defaults(@entTMP,     2, 5,16,17)
-    tbl.attach_defaults(lblDo,       5, 6,16,17)
-    tbl.attach_defaults(@lblTVal,    6, 7,16,17)
-    tbl.attach_defaults(lblTMPCfg1a, 0, 2,17,18)
-    tbl.attach_defaults(@entTMPCfg1a,2, 5,17,18)
-    tbl.attach_defaults(lblTMPCfg1b, 0, 2,18,19)
-    tbl.attach_defaults(@entTMPCfg1b,2, 5,18,19)
-    tbl.attach_defaults(lblTMPCfg2a, 0, 2,19,20)
-    tbl.attach_defaults(@entTMPCfg2a,2, 5,19,20)
-    tbl.attach_defaults(@lblTVal2,   6, 7,19,20)
-    tbl.attach_defaults(lblTMPCfg2b, 0, 2,20,21)
-    tbl.attach_defaults(@entTMPCfg2b,2, 5,20,21)
+    tbl.attach_defaults(lblTMP,      0, 2,18,19)
+    tbl.attach_defaults(@entTMP,     2, 5,18,19)
+    tbl.attach_defaults(lblDo,       5, 6,18,19)
+    tbl.attach_defaults(@lblTVal,    6, 7,18,19)
+    tbl.attach_defaults(lblTMPCfg1a, 0, 2,19,20)
+    tbl.attach_defaults(@entTMPCfg1a,2, 5,19,20)
+    tbl.attach_defaults(lblTMPCfg1b, 0, 2,20,21)
+    tbl.attach_defaults(@entTMPCfg1b,2, 5,20,21)
+    tbl.attach_defaults(lblTMPCfg2a, 0, 2,21,22)
+    tbl.attach_defaults(@entTMPCfg2a,2, 5,21,22)
+    tbl.attach_defaults(@lblTVal2,   6, 7,21,22)
+    tbl.attach_defaults(lblTMPCfg2b, 0, 2,22,23)
+    tbl.attach_defaults(@entTMPCfg2b,2, 5,22,23)
 
-    tbl.attach_defaults(lblPumpCfg, 0, 2,22,23)
-    tbl.attach_defaults(@entPumpCfg,2, 5,22,23)
-    tbl.attach_defaults(lblUnit4,   5, 7,22,23)
-    tbl.attach_defaults(@lblPumpVal,6, 7,23,24)
+    tbl.attach_defaults(lblPumpCfg,  0, 2,24,25)
+    tbl.attach_defaults(@entPumpCfg, 2, 5,24,25)
+    tbl.attach_defaults(lblUnit4,    5, 7,24,25)
+    tbl.attach_defaults(@lblPumpVal, 6, 7,25,26)
 
     win.add(tbl)
     win.show_all()
@@ -412,7 +436,7 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
   end
 
   def exit_seq
-    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
+    set_flag = [nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil]
     file = []
     file = IO.readlines(File_ana) if File.exist?( File_ana )
 
@@ -454,10 +478,10 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
         fw << "over_led=#{(@cbOverLed.active?)?"true":"false"}\n"
         set_flag[10] = true
       when 'meas_st'
-        fw << "meas_st=#{@entMeasSt.text.to_i}\n"
+        fw << "meas_st=#{@entMeasSt1.text.to_i}\n"
         set_flag[11] = true
       when 'meas_ed'
-        fw << "meas_ed=#{@entMeasEd.text.to_i}\n"
+        fw << "meas_ed=#{@entMeasEd1.text.to_i}\n"
         set_flag[12] = true
       when 'fact2_a'
         fw << "fact2_a=#{$fact2_a}\n"
@@ -465,6 +489,12 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
       when 'fact2_b'
         fw << "fact2_b=#{$fact2_b}\n"
         set_flag[14] = true
+      when 'meas_st2'
+        fw << "meas_st2=#{@entMeasSt2.text.to_i}\n"
+        set_flag[15] = true
+      when 'meas_ed2'
+        fw << "meas_ed2=#{@entMeasEd2.text.to_i}\n"
+        set_flag[16] = true
       else
         fw << line
       end
@@ -481,10 +511,12 @@ p [__LINE__, @spi.dataRW([0x29,0x40,0x80|((value>>6)&0x3f), 0xc0|(value&0x3f)])]
     fw << "pump=#{@entPumpCfg.text.to_i}\n" if set_flag[8] == nil
     fw << "ana_no=#{@entAna.text}\n" if set_flag[9] == nil
     fw << "over_led=#{(@cbOverLed.active?)?"true":"flase"}\n" if set_flag[10] == nil
-    fw << "meas_st=#{@entMeasSt.text.to_i}\n" if set_flag[11] == nil
-    fw << "meas_ed=#{@entMeasEd.text.to_i}\n" if set_flag[12] == nil
+    fw << "meas_st=#{@entMeasSt1.text.to_i}\n" if set_flag[11] == nil
+    fw << "meas_ed=#{@entMeasEd1.text.to_i}\n" if set_flag[12] == nil
     fw << "fact2_a=#{$fact2_a}\n" if set_flag[13] == nil
     fw << "fact2_b=#{$fact2_b}\n" if set_flag[14] == nil
+    fw << "meas_st2=#{@entMeasSt2.text.to_i}\n" if set_flag[15] == nil
+    fw << "meas_ed2=#{@entMeasEd2.text.to_i}\n" if set_flag[16] == nil
     fw.close
 
     Gtk.main_quit()
@@ -545,7 +577,7 @@ Gtk.timeout_add( 1000 ) do
   style = Gtk::Style.new
   style.set_fg(Gtk::STATE_NORMAL, 0, 0, 65535)
   w.lblMeasDt.style = style
-  w.lblMeasDt.set_text("測定値:#{w.spi.meas_data}")
+  w.lblMeasDt.set_text("測定値: #{w.spi.meas_data1}: #{w.spi.meas_data2}")
 
   # 経過時刻表示
 # tim = Time.at(Time.at(Time.now - w.time_st).getutc)
